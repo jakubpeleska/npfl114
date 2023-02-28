@@ -57,25 +57,24 @@ def main(args: argparse.Namespace) -> Tuple[List[float], List[float]]:
         )
         print("Done", file=sys.stderr)
 
-    individual_accuracies, ensemble_accuracies = [], []
+    x_dev = mnist.dev.data["images"]
+    y_dev_true = mnist.dev.data["labels"]
+    
+    individual_predictions = []
+    individual_accuracies = []
+    ensemble_accuracies = []
     for model in range(args.models):
-        # TODO: Compute the accuracy on the dev set for the individual `models[model]`.
-        individual_accuracy = ...
-
-        # TODO: Compute the accuracy on the dev set for
-        # the ensemble `models[0:model+1].
-        #
-        # Generally you can choose one of the following approaches:
-        # 1) Use Keras Functional API and construct a `tf.keras.Model` averaging the models
-        #    in the ensemble (using for example `tf.keras.layers.Average` or manually
-        #    with `tf.math.reduce_mean`). Then you can compile the model with
-        #    the required metric (without an optimizer and a loss) and use `model.evaluate`.
-        # 2) Manually perform the averaging (using TF or NumPy). In this case you do not
-        #    need to construct Keras ensemble model at all, and instead call `model.predict`
-        #    on the individual models and  average the results. To measure accuracy,
-        #    either do it completely  manually or use `tf.metrics.SparseCategoricalAccuracy`.
-        ensemble_accuracy = ...
-
+        # Compute the accuracy on the dev set for the individual `models[model]`.
+        _, individual_accuracy = models[model].evaluate(x_dev, y_dev_true)
+        
+        y_dev_pred = models[model].predict(x_dev)
+        individual_predictions.append(y_dev_pred)
+        y_dev_pred_ensemble = tf.reduce_mean(individual_predictions, axis=0)
+        
+        m = tf.metrics.SparseCategoricalAccuracy()
+        m.update_state(y_dev_true, y_dev_pred_ensemble)
+        ensemble_accuracy = m.result()
+        
         # Store the accuracies
         individual_accuracies.append(individual_accuracy)
         ensemble_accuracies.append(ensemble_accuracy)
