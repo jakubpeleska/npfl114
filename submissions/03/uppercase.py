@@ -17,8 +17,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--alphabet_size", default=30, type=int, help="If given, use this many most frequent chars.")
 parser.add_argument("--batch_size", default=300, type=int, help="Batch size.")
 parser.add_argument("--debug", default=False, action="store_true", help="If given, run functions eagerly.")
+parser.add_argument("--dropout_rate", default=0.2, type=float, help="Dropout rate applied on hidden layers.")
 parser.add_argument("--epochs", default=3, type=int, help="Number of epochs.")
 parser.add_argument("--evaluate", default=False, help="Evaluate model.")
+parser.add_argument("--hidden_layers", default=2, type=int, help="Number of hidden layers.")
+parser.add_argument("--hidden_size", default=750, type=int, help="Size of hidden layers.")
+parser.add_argument("--hidden_size_1", default=None, type=int, help="Size of hidden layer 1.")
+parser.add_argument("--hidden_size_2", default=None, type=int, help="Size of hidden layer 2.")
 parser.add_argument("--model", default="uppercase_model.h5", type=str, help="Output model path.")
 parser.add_argument("--prediction", default="uppercase_test.txt", type=str, help="Output test prediction path.")
 parser.add_argument("--save_model", default=True, help="Save model.")
@@ -61,7 +66,6 @@ def main(args: argparse.Namespace) -> None:
     input_size = 2 * args.window + 1
     alphabet_size = len(uppercase_data.train.alphabet)
     
-    print(uppercase_data.train.alphabet)
     if args.evaluate:
         model = tf.keras.models.load_model(args.model, compile=False)
     else:
@@ -69,25 +73,23 @@ def main(args: argparse.Namespace) -> None:
         model.add(tf.keras.layers.Input(shape=[input_size], dtype=tf.int32))
         model.add(tf.keras.layers.Lambda(lambda x: tf.one_hot(x, alphabet_size)))
         model.add(tf.keras.layers.Flatten())
-        model.add(tf.keras.layers.Dense(input_size*alphabet_size, activation=tf.nn.relu))
-        model.add(tf.keras.layers.Dropout(0.2))
-        model.add(tf.keras.layers.Dense(input_size*alphabet_size, activation=tf.nn.relu))
-        model.add(tf.keras.layers.Dropout(0.2))
-        model.add(tf.keras.layers.Dense(input_size*alphabet_size, activation=tf.nn.relu))
-        model.add(tf.keras.layers.Dropout(0.2))
+        model.add(tf.keras.layers.Dense(args.hidden_size_1 if args.hidden_size_1 is not None else args.hidden_size, activation=tf.nn.relu))
+        model.add(tf.keras.layers.Dropout(args.dropout_rate))
+        model.add(tf.keras.layers.Dense(args.hidden_size_2 if args.hidden_size_2 is not None else args.hidden_size, activation=tf.nn.relu))
+        model.add(tf.keras.layers.Dropout(args.dropout_rate))
         model.add(tf.keras.layers.Dense(2, activation=tf.nn.softmax))
         
-        model.summary()
+        # model.summary()
             
         model.compile(optimizer=tf.keras.optimizers.Adam(),
                     loss=tf.losses.SparseCategoricalCrossentropy(),
                     metrics=[tf.metrics.SparseCategoricalAccuracy("accuracy")])
         
-        tb_callback = tf.keras.callbacks.TensorBoard(args.logdir, histogram_freq=1)
+        # tb_callback = tf.keras.callbacks.TensorBoard(args.logdir, histogram_freq=1)
         
         labels = uppercase_data.train.data["labels"]
         windows = uppercase_data.train.data["windows"]
-        keep = np.logical_or(labels == 1, np.random.choice([True,False], p=[0.5, 0.5], size=len(labels)))
+        keep = np.logical_or(labels == 1, np.random.choice([True,False], p=[1, 0], size=len(labels)))
         
         train_data = {"labels": [], "windows": []}
         
@@ -96,16 +98,17 @@ def main(args: argparse.Namespace) -> None:
         
         labels = train_data["labels"]
 
-        print(len(labels), len(labels[labels == 0]) / len(labels), len(labels[labels == 1])/ len(labels))
+        # print(len(labels), len(labels[labels == 0]) / len(labels), len(labels[labels == 1])/ len(labels))
         
         model.fit(train_data["windows"], 
                 train_data["labels"],
                 batch_size=args.batch_size, 
                 epochs=args.epochs,
-                callbacks=[tb_callback])
+                # callbacks=[tb_callback]
+                )
     
     # Generate correctly capitalized test set.
-    os.makedirs(args.logdir, exist_ok=True)
+    # os.makedirs(args.logdir, exist_ok=True)
     
     if args.save_model and not args.evaluate:
         # Save the model, without the optimizer state.
@@ -115,18 +118,35 @@ def main(args: argparse.Namespace) -> None:
     dev_accuracy = uppercase_data.evaluate(uppercase_data.dev, prediction)
     print(f'Dev accuracy: {dev_accuracy}%')
     
-    if True:
-        filename = "uppercase_dev.txt"
-        with open(filename, "w", encoding="utf-8") as predictions_file:
-            predictions_file.write(prediction)
-    
     if args.save_prediction:
         # filename = os.path.join(args.logdir, "uppercase_test.txt")
         filename = args.prediction
         prediction = predict(model, uppercase_data.test)
         with open(filename, "w", encoding="utf-8") as predictions_file:
             predictions_file.write(prediction)
+            
+    return dev_accuracy
 
 if __name__ == "__main__":
     args = parser.parse_args([] if "__file__" not in globals() else None)
-    main(args)
+    
+    sizes_1 = [2500]
+    dropout_rates = [0.2]
+    
+    accuracies = np.zeros((len(sizes_1), len(dropout_rates)))
+    
+    args.epochs = 3
+    args.window = 7
+    args.alphabet_size = 100
+    args.save_model = True
+    args.save_prediction = True
+    args.hidden_size_2 = 750
+    
+    for i, size_1 in enumerate(sizes_1):
+        for j, dropout_rate in enumerate(dropout_rates):
+            args.hidden_size_1 = size_1
+            args.dropout_rate = dropout_rate
+            accuracies[i, j] = main(args)
+            
+    print(accuracies)
+    print(np.argmax(accuracies))
