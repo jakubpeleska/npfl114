@@ -64,14 +64,10 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
     )
     tb_callback = tf.keras.callbacks.TensorBoard(args.logdir)
 
-    # TODO: Create `train` and `dev` datasets by using
+    # Create `train` and `dev` datasets by using
     # `tf.data.Dataset.from_tensor_slices` on `cifar.train` and `cifar.dev`.
-    # The structure of a single example is inferred from the argument
-    # of `from_tensor_slices` -- in our case we want each example to
-    # be a pair of `(input_image, target_label)`, so we need to pass
-    # a pair `(data["images"], data["labels"])` to `from_tensor_slices`.
-    train = ...
-    dev = ...
+    train = tf.data.Dataset.from_tensor_slices((cifar.train.data["images"], cifar.train.data["labels"]))
+    dev = tf.data.Dataset.from_tensor_slices((cifar.dev.data["images"], cifar.dev.data["labels"]))
 
     # Convert images from tf.uint8 to tf.float32 and scale them to [0, 1] in the process.
     def image_to_float(image: tf.Tensor, label: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -99,22 +95,24 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
         image = tf.keras.layers.RandomTranslation(0.15, 0.15, seed=args.seed)(image)
         image = tf.keras.layers.RandomRotation(0.1, seed=args.seed)(image)  # Does not always help (too blurry?).
         return image, label
-
-    # TODO: Now prepare the training pipeline.
-    # - First, use the `.take(5000)` method to utilize only the first 5000 examples.
-    # - Call `.shuffle(5000, seed=args.seed)` to shuffle the data using
-    #   the given seed and a buffer of the size of the whole data.
-    # - Call `.map(image_to_float)` to convert images from tf.uint8 to tf.float32.
-    #   Note that you want to do it after shuffling to minimize the buffer size.
-    # - If `args.augment` is set, perform dataset augmentation via a call to either
-    #   - `.map(train_augment_tf_layers)`, if `args.augment == "tf_image"`, or
-    #   - `.map(train_augment_layers)`, if `args.augment == "layers"`.
-    # - Finally, call `.batch(args.batch_size)` to generate batches.
-    # - Optionally, you might want to add `.prefetch(tf.data.AUTOTUNE)` as
-    #   the last call -- it allows the pipeline to run in parallel with
-    #   the training process, dynamically adjusting the buffer size of the
-    #   prefetched elements.
-    train = ...
+    
+    # Use only first 5000 images, shuffle them and change type from tf.uint8 to tf.float32.
+    train = train.take(5000).shuffle(5000, seed=args.seed).map(image_to_float)
+    
+    # Do the image augmentation
+    if args.augment is not None:
+        if args.augment == "tf_image":
+            train = train.map(train_augment_tf_image)
+        elif args.augment == "layers":
+            train = train.map(train_augment_layers)
+    
+    # Generate batches
+    train = train.batch(args.batch_size)
+    
+    # It allows the pipeline to run in parallel with
+    # the training process, dynamically adjusting the buffer size of the
+    # prefetched elements.
+    train = train.prefetch(tf.data.AUTOTUNE)
 
     if args.show_images:
         summary_writer = tf.summary.create_file_writer(os.path.join(args.logdir, "images"))
@@ -125,11 +123,8 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
                 tf.summary.image("train/batch", images)
         summary_writer.close()
 
-    # TODO: Prepare the `dev` pipeline:
-    # - Call `.map(image_to_float)` to convert images from tf.uint8 to tf.float32.
-    # - Use `.batch(args.batch_size)` to generate batches.
-    # - Optionally, add the `prefetch` call.
-    dev = ...
+    # Do not augment the dev dataset
+    dev = dev.map(image_to_float).batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
 
     # Train
     logs = model.fit(train, epochs=args.epochs, validation_data=dev, callbacks=[tb_callback])
