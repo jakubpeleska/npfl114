@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-from mnist import MNIST
-import tensorflow as tf
-import numpy as np
 import argparse
 import datetime
 import os
@@ -10,6 +7,9 @@ from typing import Dict
 # Report only TF errors by default
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
+from mnist import MNIST
+import tensorflow as tf
+import numpy as np
 
 parser = argparse.ArgumentParser()
 
