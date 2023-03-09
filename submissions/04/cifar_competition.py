@@ -105,34 +105,51 @@ def main(args: argparse.Namespace) -> None:
             re.sub("(.)[^_]*_?", r"\1", k), v) for k, v in sorted(vars(args).items())))
     ))
     # Load data
-    cifar = CIFAR10(size={"dev": 5000})
+    cifar = CIFAR10()
     
     # Augment data
     train, dev = augment_data(cifar, args)
     
     conv1_filters = 64
-    conv1 = f'CB-{conv1_filters}-3-1-same'
+    conv1_1 = f'CB-{conv1_filters}-3-1-same'
+    conv1_2 = f'CB-{conv1_filters}-3-1-same'
+    max_pool1 = f'M-2-2'
     
-    conv2_filters = 64
-    conv2 = f'R-[CB-{conv2_filters}-3-1-same,CB-{conv2_filters}-3-1-same]'
+    block1 = f'{conv1_1},{conv1_2},{max_pool1}'
+    
+    conv2_filters = 128
+    conv2_1 = f'CB-{conv2_filters}-3-1-same'
+    conv2_2 = f'CB-{conv2_filters}-3-1-same'
+    max_pool2 = f'M-2-2'
+    
+    block2 = f'{conv2_1},{conv2_2},{max_pool2}'
+    
+    conv3_filters = 256
+    conv3_1 = f'CB-{conv3_filters}-3-1-same'
+    conv3_2 = f'CB-{conv3_filters}-3-1-same'
+    conv3_3 = f'CB-{conv3_filters}-3-1-same'
+    max_pool3 = f'M-2-2'
+    
+    block3 = f'{conv3_1},{conv3_2},{conv3_3},{max_pool3}'
 
-    conv3_filters = 16
-    conv3 = f'CB-{conv3_filters}-3-1-same'
+    conv4_filters = 512
+    conv4_1 = f'CB-{conv4_filters}-3-1-same'
+    conv4_2 = f'CB-{conv4_filters}-3-1-same'
+    conv4_3 = f'CB-{conv4_filters}-3-1-same'
+    max_pool4 = f'M-2-2'
     
-    conv4_filters = 16
-    conv4 = f'R-[CB-{conv4_filters}-3-1-same,CB-{conv4_filters}-3-1-same]'
-    
-    max_pool = f'M-2-2,F'
+    block4 = f'{conv4_1},{conv4_2},{conv4_3},{max_pool4}'
     
     N1 = 512
     N2 = 256
     dropout = 0.5
-    lin_class = f'H-{N1},D-{dropout},H-{N2},D-{dropout}'
+    lin_class = f'F,H-{N1},D-{dropout},H-{N2},D-{dropout}'
 
     # Create model
     model = CNNModel([CIFAR10.H, CIFAR10.W, CIFAR10.C], len(CIFAR10.LABELS),
-                     f"{conv1},{conv2},{conv3},{conv4},{max_pool},{lin_class}")
+                     f"{block1},{block2},{block3},{block4},{lin_class}")
     
+    model.summary()
     # Learn model
     model.fit(train, epochs=args.epochs, validation_data=dev)
 
