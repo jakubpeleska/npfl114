@@ -52,7 +52,7 @@ def augment_data(cifar: CIFAR10, args: argparse.Namespace):
         image = tf.keras.layers.RandomFlip("horizontal", seed=args.seed)(image)  # Bug, flip always; fixed in TF 2.12.
         image = tf.keras.layers.RandomZoom(0.2, seed=args.seed)(image)
         image = tf.keras.layers.RandomTranslation(0.15, 0.15, seed=args.seed)(image)
-        image = tf.keras.layers.RandomRotation(0.1, seed=args.seed)(image)  # Does not always help (too blurry?).
+        # image = tf.keras.layers.RandomRotation(0.1, seed=args.seed)(image)  # Does not always help (too blurry?).
         return image, label
     
     # Use only first 5000 images, shuffle them and change type from tf.uint8 to tf.float32.
@@ -110,51 +110,69 @@ def main(args: argparse.Namespace) -> None:
     # Augment data
     train, dev = augment_data(cifar, args)
     
-    conv1_filters = 64
-    conv1_1 = f'CB-{conv1_filters}-3-1-same'
-    conv1_2 = f'CB-{conv1_filters}-3-1-same'
+    scale = 2
+    
+    conv1_filters = 32*scale
+    conv1_repeat = 2
+    conv1 = f'CB-{conv1_filters}-3-1-same,' * conv1_repeat
     max_pool1 = f'M-2-2'
     
-    block1 = f'{conv1_1},{conv1_2},{max_pool1}'
+    block1 = f'{conv1}{max_pool1}'
     
-    conv2_filters = 128
-    conv2_1 = f'CB-{conv2_filters}-3-1-same'
-    conv2_2 = f'CB-{conv2_filters}-3-1-same'
+    conv2_filters = 64*scale
+    conv2_repeat = 2
+    conv2 = f'CB-{conv2_filters}-3-1-same,' * conv2_repeat
     max_pool2 = f'M-2-2'
     
-    block2 = f'{conv2_1},{conv2_2},{max_pool2}'
+    block2 = f'{conv2}{max_pool2}'
     
-    conv3_filters = 256
-    conv3_1 = f'CB-{conv3_filters}-3-1-same'
-    conv3_2 = f'CB-{conv3_filters}-3-1-same'
-    conv3_3 = f'CB-{conv3_filters}-3-1-same'
+    conv3_filters = 128*scale
+    conv3_repeat = 3
+    conv3 = f'CB-{conv3_filters}-3-1-same,' * conv3_repeat
     max_pool3 = f'M-2-2'
     
-    block3 = f'{conv3_1},{conv3_2},{conv3_3},{max_pool3}'
+    block3 = f'{conv3}{max_pool3}'
 
-    conv4_filters = 512
-    conv4_1 = f'CB-{conv4_filters}-3-1-same'
-    conv4_2 = f'CB-{conv4_filters}-3-1-same'
-    conv4_3 = f'CB-{conv4_filters}-3-1-same'
+    conv4_filters = 256*scale
+    conv4_repeat = 3
+    conv4 = f'CB-{conv4_filters}-3-1-same,' * conv4_repeat
     max_pool4 = f'M-2-2'
     
-    block4 = f'{conv4_1},{conv4_2},{conv4_3},{max_pool4}'
+    block4 = f'{conv4}{max_pool4}'
     
-    N1 = 512
-    N2 = 256
-    dropout = 0.5
+    N1 = 256*scale
+    N2 = 128*scale
+    dropout = 0.25
     lin_class = f'F,H-{N1},D-{dropout},H-{N2},D-{dropout}'
+    
+    # Generate test set annotations, but in `args.logdir` to allow parallel execution.
+    os.makedirs(args.logdir, exist_ok=True)
 
     # Create model
     model = CNNModel([CIFAR10.H, CIFAR10.W, CIFAR10.C], len(CIFAR10.LABELS),
-                     f"{block1},{block2},{block3},{block4},{lin_class}")
+                     f"{block1},{block2},{block3},{block4},{block4},{lin_class}", args.logdir)
     
     model.summary()
-    # Learn model
-    model.fit(train, epochs=args.epochs, validation_data=dev)
+    
+    checkpoint_path = os.path.join(args.logdir, "model_weights.ckpt")
+        
+    model.save_weights(checkpoint_path)
 
-    # Generate test set annotations, but in `args.logdir` to allow parallel execution.
-    os.makedirs(args.logdir, exist_ok=True)
+    # Learn model
+    model.fit(train, 
+              epochs=args.epochs, 
+              validation_data=dev, 
+              callbacks=[
+                  tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
+                                                     monitor='val_accuracy',
+                                                     mode='max',
+                                                     save_weights_only=True,
+                                                     save_best_only=True)
+                  ]
+              )
+    
+    model.load_weights(checkpoint_path)
+
     with open(os.path.join(args.logdir, "cifar_competition_test.txt"), "w", encoding="utf-8") as predictions_file:
         for probs in model.predict(cifar.test.data["images"], batch_size=args.batch_size):
             print(np.argmax(probs), file=predictions_file)
