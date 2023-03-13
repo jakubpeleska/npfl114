@@ -41,7 +41,7 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
     ))
 
     # Load the data
-    cifar = CIFAR10(size={"dev": 1000})
+    cifar = CIFAR10(size={"dev": 1_000})
 
     # Create the model
     inputs = tf.keras.layers.Input(shape=[CIFAR10.H, CIFAR10.W, CIFAR10.C])
@@ -101,13 +101,13 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
         return image, label
 
     # TODO: Now prepare the training pipeline.
-    # - First, use the `.take(5000)` method to utilize only the first 5000 examples.
-    # - Call `.shuffle(5000, seed=args.seed)` to shuffle the data using
+    # - First, use the `.take(5_000)` method to utilize only the first 5 000 examples.
+    # - Call `.shuffle(5_000, seed=args.seed)` to shuffle the data using
     #   the given seed and a buffer of the size of the whole data.
     # - Call `.map(image_to_float)` to convert images from tf.uint8 to tf.float32.
     #   Note that you want to do it after shuffling to minimize the buffer size.
     # - If `args.augment` is set, perform dataset augmentation via a call to either
-    #   - `.map(train_augment_tf_layers)`, if `args.augment == "tf_image"`, or
+    #   - `.map(train_augment_tf_image)`, if `args.augment == "tf_image"`, or
     #   - `.map(train_augment_layers)`, if `args.augment == "layers"`.
     # - Finally, call `.batch(args.batch_size)` to generate batches.
     # - Optionally, you might want to add `.prefetch(tf.data.AUTOTUNE)` as
@@ -119,7 +119,7 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
     if args.show_images:
         summary_writer = tf.summary.create_file_writer(os.path.join(args.logdir, "images"))
         with summary_writer.as_default(step=0):
-            for images, _ in train.unbatch().batch(100).take(1):
+            for images, _ in train.rebatch(100).take(1):
                 images = tf.transpose(tf.reshape(images, [10, 10 * images.shape[1]] + images.shape[2:]), [0, 2, 1, 3])
                 images = tf.transpose(tf.reshape(images, [1, 10 * images.shape[1]] + images.shape[2:]), [0, 2, 1, 3])
                 tf.summary.image("train/batch", images)
