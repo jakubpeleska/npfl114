@@ -14,11 +14,13 @@ import tensorflow as tf
 
 # Also, you can set the number of the threads 0 to use all your CPU cores.
 parser = argparse.ArgumentParser()
-parser.add_argument("--augment", default=None, type=str, choices=["tf_image", "layers"], help="Augmentation type.")
+parser.add_argument("--augment", default="tf_image", type=str, choices=["tf_image", "layers"], help="Augmentation type.")
 parser.add_argument("--batch_size", default=50, type=int, help="Batch size.")
 parser.add_argument("--debug", default=False, action="store_true",help="If given, run functions eagerly.")
-parser.add_argument("--epochs", default=1,type=int, help="Number of epochs.")
-parser.add_argument("--filters", default=64,type=int, help="Number of filters in convolutional layers.")
+parser.add_argument("--dropout_rate", default=0.25, type=float, help="Dropout rate used for regularization in the linear classifier.")
+parser.add_argument("--epochs", default=60,type=int, help="Number of epochs.")
+parser.add_argument("--model_scale", default=2, type=float, help="Scale of the whole model architecture.")
+parser.add_argument("--model_weights_checkpoint", default=None, type=str, help="Load saved weights of previously trained model.")
 parser.add_argument("--save_preditctions", default=True, type=bool,help="Switch to enable saving the predictions on test data.")
 parser.add_argument("--show_images", default=False, type=bool,help="Switch to enable showing the augmented images in Tensoboard.")
 parser.add_argument("--seed", default=42, type=int, help="Random seed.")
@@ -27,9 +29,12 @@ parser.add_argument("--threads", default=0, type=int,help="Maximum number of thr
 def augment_data(cifar: CIFAR10, args: argparse.Namespace):
     train = tf.data.Dataset.from_tensor_slices((cifar.train.data["images"], cifar.train.data["labels"]))
     dev = tf.data.Dataset.from_tensor_slices((cifar.dev.data["images"], cifar.dev.data["labels"]))
+    test = tf.data.Dataset.from_tensor_slices(cifar.test.data["images"])
     
     # Convert images from tf.uint8 to tf.float32 and scale them to [0, 1] in the process.
-    def image_to_float(image: tf.Tensor, label: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def image_to_float(image: tf.Tensor, label: tf.Tensor = None) -> Tuple[tf.Tensor, tf.Tensor]:
+        if label is None:
+            return tf.image.convert_image_dtype(image, tf.float32)
         return tf.image.convert_image_dtype(image, tf.float32), label
 
     # Simple data augmentation using `tf.image`.
@@ -55,7 +60,7 @@ def augment_data(cifar: CIFAR10, args: argparse.Namespace):
         # image = tf.keras.layers.RandomRotation(0.1, seed=args.seed)(image)  # Does not always help (too blurry?).
         return image, label
     
-    # Use only first 5000 images, shuffle them and change type from tf.uint8 to tf.float32.
+    # Use only the first 5000 images, shuffle them and change type from tf.uint8 to tf.float32.
     train = train.shuffle(10000, seed=args.seed).map(image_to_float)
     
     # Do the image augmentation
@@ -82,10 +87,11 @@ def augment_data(cifar: CIFAR10, args: argparse.Namespace):
                 tf.summary.image("train/batch", images)
         summary_writer.close()
 
-    # Do not augment the dev dataset
+    # Do not augment the dev and test dataset
     dev = dev.map(image_to_float).batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
+    test = test.map(image_to_float).batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
     
-    return train, dev
+    return train, dev, test
 
 
 def main(args: argparse.Namespace) -> None:
@@ -108,41 +114,43 @@ def main(args: argparse.Namespace) -> None:
     cifar = CIFAR10()
     
     # Augment data
-    train, dev = augment_data(cifar, args)
+    train, dev, test = augment_data(cifar, args)
     
-    scale = 2
+    # Model architecture scale
+    scale = args.model_scale
     
-    conv1_filters = 32*scale
-    conv1_repeat = 2
+    # VGG16-like model
+    conv1_filters = int(32*scale)
+    conv1_repeat = 1
     conv1 = f'CB-{conv1_filters}-3-1-same,' * conv1_repeat
     max_pool1 = f'M-2-2'
     
     block1 = f'{conv1}{max_pool1}'
     
-    conv2_filters = 64*scale
-    conv2_repeat = 2
+    conv2_filters = int(64*scale)
+    conv2_repeat = 1
     conv2 = f'CB-{conv2_filters}-3-1-same,' * conv2_repeat
     max_pool2 = f'M-2-2'
     
     block2 = f'{conv2}{max_pool2}'
     
-    conv3_filters = 128*scale
-    conv3_repeat = 3
+    conv3_filters = int(128*scale)
+    conv3_repeat = 2
     conv3 = f'CB-{conv3_filters}-3-1-same,' * conv3_repeat
     max_pool3 = f'M-2-2'
     
     block3 = f'{conv3}{max_pool3}'
 
-    conv4_filters = 256*scale
-    conv4_repeat = 3
+    conv4_filters = int(256*scale)
+    conv4_repeat = 2
     conv4 = f'CB-{conv4_filters}-3-1-same,' * conv4_repeat
     max_pool4 = f'M-2-2'
     
     block4 = f'{conv4}{max_pool4}'
     
-    N1 = 256*scale
-    N2 = 128*scale
-    dropout = 0.25
+    N1 = int(256*scale)
+    N2 = int(128*scale)
+    dropout = args.dropout_rate
     lin_class = f'F,H-{N1},D-{dropout},H-{N2},D-{dropout}'
     
     # Generate test set annotations, but in `args.logdir` to allow parallel execution.
@@ -152,29 +160,33 @@ def main(args: argparse.Namespace) -> None:
     model = CNNModel([CIFAR10.H, CIFAR10.W, CIFAR10.C], len(CIFAR10.LABELS),
                      f"{block1},{block2},{block3},{block4},{block4},{lin_class}", args.logdir)
     
-    model.summary()
+    # model.summary()
     
     checkpoint_path = os.path.join(args.logdir, "model_weights.ckpt")
         
     model.save_weights(checkpoint_path)
+    
+    if args.model_weights_checkpoint is not None:
+        model.load_weights(args.model_weights_checkpoint)
+    
+    checkpointCB = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
+                                                      monitor='val_accuracy',
+                                                      mode='max',
+                                                      save_weights_only=True,
+                                                      save_best_only=True)
 
     # Learn model
     model.fit(train, 
               epochs=args.epochs, 
               validation_data=dev, 
-              callbacks=[
-                  tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
-                                                     monitor='val_accuracy',
-                                                     mode='max',
-                                                     save_weights_only=True,
-                                                     save_best_only=True)
-                  ]
+              callbacks=[model.tb_callback, checkpointCB]
               )
     
+    # Load model with best validation accuracy
     model.load_weights(checkpoint_path)
 
     with open(os.path.join(args.logdir, "cifar_competition_test.txt"), "w", encoding="utf-8") as predictions_file:
-        for probs in model.predict(cifar.test.data["images"], batch_size=args.batch_size):
+        for probs in model.predict(test):
             print(np.argmax(probs), file=predictions_file)
 
 

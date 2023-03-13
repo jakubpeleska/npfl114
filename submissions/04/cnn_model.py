@@ -77,7 +77,7 @@ class CNNModel(tf.keras.Model):
             metrics=[tf.metrics.SparseCategoricalAccuracy(name="accuracy")],
         )
         if logdir is not None:
-            self.tb_callback = tf.keras.callbacks.TensorBoard(logdir)
+            self.tb_callback = tf.keras.callbacks.TensorBoard(logdir, histogram_freq=1)
         
             
     def apply_layer(self, inputs: list, layer_type: str, parameters: list):
