@@ -103,12 +103,13 @@ def main(args: argparse.Namespace) -> None:
         tf.config.run_functions_eagerly(True)
         tf.data.experimental.enable_debug_mode()
 
+    logdir_arguments = ["augment", "batch_size", "dropout_rate", "epochs", "model_scale", "seed"]
     # Create logdir name
     args.logdir = os.path.join("logs", "{}-{}-{}".format(
         os.path.basename(globals().get("__file__", "notebook")),
         datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S"),
         ",".join(("{}={}".format(
-            re.sub("(.)[^_]*_?", r"\1", k), v) for k, v in sorted(vars(args).items())))
+            re.sub("(.)[^_]*_?", r"\1", k), v) for k, v in filter(lambda item: logdir_arguments.__contains__(item[0]) ,sorted(vars(args).items()))))
     ))
     # Load data
     cifar = CIFAR10()
