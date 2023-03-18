@@ -72,7 +72,30 @@ class Convolution:
         # - the `inputs` layer,
         # - `self._kernel`,
         # - `self._bias`.
-        inputs_gradient, kernel_gradient, bias_gradient = ..., ..., ...
+        print( inputs.shape, outputs_gradient.shape, self._kernel.shape)
+        
+        pad = inputs.shape[1] - self._kernel_size + 1
+        
+        inputs_gradient = np.zeros(inputs.shape)
+        for i in range(self._kernel_size):
+            for j in range(self._kernel_size):
+                temp = np.einsum('...a,xy->...x', outputs_gradient, self._kernel[i,j])
+                inputs_gradient[:,i:pad+i:self._stride, j:pad+j:self._stride] += temp
+    
+        kernel_gradient = np.zeros(self._kernel.shape)
+        
+        for i in range(self._kernel_size):
+            for j in range(self._kernel_size):
+                _in1 = inputs[:, i:pad+i:self._stride, j:pad+j:self._stride]
+                _in2 = outputs_gradient
+                temp = np.einsum('...xya,...xyb->...ab', _in1, _in2)
+                print(temp.shape)
+                temp = tf.reduce_mean(temp, axis=0)
+                kernel_gradient[i,j] = tf.reshape(temp, self._kernel.shape[2:])
+                
+        inputs_gradient = tf.constant(inputs_gradient)
+        kernel_gradient = tf.constant(kernel_gradient)
+        bias_gradient = tf.reduce_mean(outputs_gradient, axis=0)
 
         # If requested, verify that the three computed gradients are correct.
         if self._verify:
