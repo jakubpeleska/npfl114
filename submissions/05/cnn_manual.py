@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# a0e27015-19ae-4c8f-81bd-bf628505a35a
 import argparse
 import os
 from typing import List, Tuple
@@ -66,36 +67,27 @@ class Convolution:
     def backward(
         self, inputs: tf.Tensor, outputs: tf.Tensor, outputs_gradient: tf.Tensor
     ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        # TODO: Given this layer's inputs, this layer's outputs,
-        # and the gradient with respect to the layer's outputs,
-        # compute the derivatives of the loss with respect to
-        # - the `inputs` layer,
-        # - `self._kernel`,
-        # - `self._bias`.
-        print( inputs.shape, outputs_gradient.shape, self._kernel.shape)
+                
+        # First compute derivative w.r.t. ReLU layer
+        relu_gradient = tf.sign(outputs) * outputs_gradient
         
-        pad = inputs.shape[1] - self._kernel_size + 1
-        
+        # Init gradients w/zeros
         inputs_gradient = np.zeros(inputs.shape)
-        for i in range(self._kernel_size):
-            for j in range(self._kernel_size):
-                temp = np.einsum('...a,xy->...x', outputs_gradient, self._kernel[i,j])
-                inputs_gradient[:,i:pad+i:self._stride, j:pad+j:self._stride] += temp
-    
         kernel_gradient = np.zeros(self._kernel.shape)
         
+        extended_gradient = relu_gradient[:, :, :, None, :]
+        pad = inputs.shape[1] - self._kernel_size + 1
         for i in range(self._kernel_size):
             for j in range(self._kernel_size):
-                _in1 = inputs[:, i:pad+i:self._stride, j:pad+j:self._stride]
-                _in2 = outputs_gradient
-                temp = np.einsum('...xya,...xyb->...ab', _in1, _in2)
-                print(temp.shape)
-                temp = tf.reduce_mean(temp, axis=0)
-                kernel_gradient[i,j] = tf.reshape(temp, self._kernel.shape[2:])
+                temp = tf.reduce_sum(self._kernel[i,j] * extended_gradient, axis=-1)
+                inputs_gradient[:,i:pad+i:self._stride, j:pad+j:self._stride] += temp
                 
-        inputs_gradient = tf.constant(inputs_gradient)
-        kernel_gradient = tf.constant(kernel_gradient)
-        bias_gradient = tf.reduce_mean(outputs_gradient, axis=0)
+                temp = inputs[:, i:pad+i:self._stride, j:pad+j:self._stride, :, None] * extended_gradient
+                kernel_gradient[i,j] = tf.reduce_sum(temp, axis=[0,1,2])
+                
+        inputs_gradient = tf.constant(inputs_gradient, dtype=tf.float32)
+        kernel_gradient = tf.constant(kernel_gradient, dtype=tf.float32)
+        bias_gradient = tf.reduce_sum(relu_gradient, axis=[0,1,2])
 
         # If requested, verify that the three computed gradients are correct.
         if self._verify:
