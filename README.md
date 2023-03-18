@@ -8,4 +8,6 @@ All created content is available under
 while all existing materials (mostly images and excerpts from papers) are
 properly referenced and are subject to original licensing.
 
-# Recodex ID Jakub Peleška - a0e27015-19ae-4c8f-81bd-bf628505a35a
+### Recodex IDs
+- Jakub Peleška - `a0e27015-19ae-4c8f-81bd-bf628505a35a`
+- Lukáš Málek - `097d9727-7c6f-4127-b1e0-771ebeb3583a`
