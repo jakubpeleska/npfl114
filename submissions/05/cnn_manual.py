@@ -31,7 +31,6 @@ class Convolution:
         self._kernel_size = kernel_size
         self._stride = stride
         self._verify = verify
-        self._input_shape = input_shape
 
         # Here the kernel and bias variables are created
         self._kernel = tf.Variable(tf.initializers.GlorotUniform(seed=42)(
@@ -39,42 +38,19 @@ class Convolution:
         self._bias = tf.Variable(tf.initializers.Zeros()([filters]))
 
     def forward(self, inputs: tf.Tensor) -> tf.Tensor:
-        # TODO: Compute the forward propagation through the convolution
+        # Compute the forward propagation through the convolution
         # with `tf.nn.relu` activation, and return the result.
-        #
-        # In order for the computation to be reasonably fast, you cannot
-        # manually iterate through the individual pixels, batch examples,
-        # input filters, or output filters. However, you can manually
-        # iterate through the kernel size.
         
-        out_size = int((self._input_shape[0] - self._kernel_size) / self._stride) + 1
-        conv = tf.initializers.zeros()([out_size, out_size, self._filters])
+        out_size = int((inputs.shape[1] - self._kernel_size) / self._stride) + 1
+        conv = tf.initializers.zeros()([inputs.shape[0],out_size, out_size, self._filters])
         
-        print(tf.shape(inputs), tf.shape(self._kernel))
-        # Reorder channels to come second (needed for fft)
-        fft_shaped_inputs = tf.transpose(inputs, perm=[0, 3, 1, 2])
-        fft_shaped_kernel = tf.transpose(self._kernel, perm=[3, 2, 0, 1])
+        pad = inputs.shape[1] - self._kernel_size + 1
         
-        print(tf.shape(fft_shaped_inputs), tf.shape(fft_shaped_kernel))
-
-        # Extract shapes
-        s1 = tf.shape(fft_shaped_inputs)[-2:]
-        s2 = tf.shape(fft_shaped_kernel)[-2:]
-        shape = s1 + s2 - 1
-        print(shape, s1 + s2 - 1)
-
-        # Compute convolution in fourier space
-        sp1 = tf.transpose(tf.signal.rfft2d(fft_shaped_inputs, shape))
-        sp2 = tf.transpose(tf.signal.rfft2d(fft_shaped_kernel, shape))
-        
-        conv = tf.signal.irfft2d(sp1 * sp2, shape)
-        
-        print(tf.shape(conv))
-
-        # Reorder channels to last
-        conv = tf.transpose(conv, perm=[2, 3, 1, 0])
+        for i in range(self._kernel_size):
+            for j in range(self._kernel_size):
+                conv += inputs[:, i:pad+i:self._stride, j:pad+j:self._stride] @ self._kernel[i,j]
             
-        # Don't forget to add the bias        
+        # Don't forget to add the bias
         conv += self._bias
         
         # ReLU activation
