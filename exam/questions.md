@@ -119,3 +119,46 @@
   a convolutional kernel $K$ with size $N \times M$, stride $S$ and $O$ output
   channels. Write down (or derive) the equation of transposed convolution
   (or equivalently backpropagation through a convolution to its inputs). [5]
+
+#### Questions@:, Lecture 6 Questions
+- Write down how $\mathit{AP}_{50}$ is computed. [5]
+
+- Considering a Fast-RCNN architecture, draw overall network architecture,
+  explain what a RoI-pooling layer is, show how the network parametrizes
+  bounding boxes and write down the loss. Finally, describe non-maximum
+  suppression and how the Fast-RCNN prediction is performed. [10]
+
+- Considering a Faster-RCNN architecture, describe the region proposal network
+  (what are anchors, architecture including both heads, how are the coordinates
+  of proposals parametrized, what does the loss look like). [10]
+
+- Considering Mask-RCNN architecture, describe the additions to a Faster-RCNN
+  architecture (the RoI-Align layer, the new mask-producing head). [5]
+
+- Write down the focal loss with class weighting, including the commonly used
+  hyperparameter values. [5]
+
+- Draw the overall architecture of a RetinaNet architecture (the FPN
+  architecture including the block combining feature maps of different
+  resolutions; the classification and bounding box generation heads, including
+  their output size). [5]
+
+#### Questions@:, Lecture 7 Questions
+- Write down how the Long Short-Term Memory (LSTM) cell operates, including
+  the explicit formulas. Also mention the forget gate bias. [10]
+
+- Write down how the Gated Recurrent Unit (GRU) operates, including
+  the explicit formulas. [10]
+
+- Describe Highway network computation. [5]
+
+- Why the usual dropout cannot be used on recurrent state? Describe
+  how the problem can be alleviated with variational dropout. [5]
+
+- Describe layer normalization including all its parameters, and write down how
+  it is computed (be sure to explicitly state over what is being normalized in
+  case of fully connected layers and convolutional layers). [5]
+
+- Sketch a tagger architecture utilizing word embeddings, recurrent
+  character-level word embeddings and two sentence-level bidirectional RNNs with
+  a residual connection. [10]
