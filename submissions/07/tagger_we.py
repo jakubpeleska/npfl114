@@ -31,21 +31,19 @@ class Model(tf.keras.Model):
         # Implement a one-layer RNN network. The input `words` is
         # a `RaggedTensor` of strings, each batch example being a list of words.
         words = tf.keras.layers.Input(shape=[None], dtype=tf.string, ragged=True)
+        
+        # Map strings in `words` to indices by using the `word_mapping` of `train.forms`.
+        idxs = train.forms.word_mapping(words)
 
-        # TODO: Map strings in `words` to indices by using the `word_mapping` of `train.forms`.
+        # Embed input words with dimensionality `args.we_dim`.
+        embedded = tf.keras.layers.Embedding(train.forms.word_mapping.vocabulary_size(), args.we_dim)(idxs)
 
-        # TODO: Embed input words with dimensionality `args.we_dim`. Note that the `word_mapping`
-        # provides a `vocabulary_size()` call returning the number of unique words in the mapping.
+        # Create the specified `args.rnn` RNN layer ("LSTM" or "GRU") with dimension `args.rnn_dim`.
+        rnn_layer = {"LSTM": tf.keras.layers.LSTM, "GRU": tf.keras.layers.GRU}[args.rnn](args.rnn_dim,return_sequences=True)
+        rnn_out = tf.keras.layers.Bidirectional(rnn_layer, merge_mode='sum')(embedded)
 
-        # TODO: Create the specified `args.rnn` RNN layer ("LSTM" or "GRU") with
-        # dimension `args.rnn_dim`. The layer should produce an output for every
-        # sequence element (so a 3D output). Then apply it in a bidirectional way on
-        # the embedded words, **summing** the outputs of forward and backward RNNs.
-
-        # TODO: Add a softmax classification layer into as many classes as there are unique
-        # tags in the `word_mapping` of `train.tags`. Note that the Dense layer can process
-        # a `RaggedTensor` without any problem.
-        predictions = ...
+        # Add a softmax classification layer into as many classes as there are unique tags in the `word_mapping` of `train.tags`.
+        predictions = tf.keras.layers.Dense(train.tags.word_mapping.vocabulary_size() ,activation=tf.nn.softmax)(rnn_out)
 
         # Check that the created predictions are a 3D tensor.
         assert predictions.shape.rank == 3
@@ -68,7 +66,7 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
     tf.config.threading.set_inter_op_parallelism_threads(args.threads)
     tf.config.threading.set_intra_op_parallelism_threads(args.threads)
     if args.debug:
-        tf.config.run_functions_eagerly(True)
+        tf.config.run_functions_eagerly(False)
         tf.data.experimental.enable_debug_mode()
 
     # Create logdir name
@@ -81,15 +79,13 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
     # Load the data
     morpho = MorphoDataset("czech_cac", max_sentences=args.max_sentences)
 
-    # Create the model and train
-    model = Model(args, morpho.train)
-
-    # TODO: Construct the data for the model, each consisting of the following pair:
+    # Construct the data for the model, each consisting of the following pair:
     # - a tensor of string words (forms) as input,
     # - a tensor of integer tag ids as targets.
-    # To create the tag ids, use the `word_mapping` of `morpho.train.tags`.
     def extract_tagging_data(example):
-        raise NotImplementedError()
+        forms = example["forms"]
+        tag_ids = morpho.train.tags.word_mapping(example["tags"])
+        return forms, tag_ids
 
     def create_dataset(name):
         dataset = getattr(morpho, name).dataset
@@ -98,7 +94,11 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
         dataset = dataset.apply(tf.data.experimental.dense_to_ragged_batch(args.batch_size))
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
         return dataset
+    
     train, dev = create_dataset("train"), create_dataset("dev")
+    
+    # Create the model and train
+    model = Model(args, morpho.train)
 
     logs = model.fit(train, epochs=args.epochs, validation_data=dev, callbacks=[model.tb_callback])
 
