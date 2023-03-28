@@ -22,7 +22,7 @@ parser.add_argument("--recodex", default=False, action="store_true", help="Evalu
 parser.add_argument("--rnn", default="LSTM", choices=["LSTM", "GRU"], help="RNN layer type.")
 parser.add_argument("--rnn_dim", default=64, type=int, help="RNN layer dimension.")
 parser.add_argument("--seed", default=42, type=int, help="Random seed.")
-parser.add_argument("--threads", default=1, type=int, help="Maximum number of threads to use.")
+parser.add_argument("--threads", default=0, type=int, help="Maximum number of threads to use.")
 parser.add_argument("--we_dim", default=64, type=int, help="Word embedding dimension.")
 parser.add_argument("--word_masking", default=0.0, type=float, help="Mask words with the given probability.")
 # If you add more arguments, ReCodEx will keep them with your default values.
@@ -40,8 +40,8 @@ class Model(tf.keras.Model):
 
         def call(self, inputs: tf.RaggedTensor, training: bool) -> tf.RaggedTensor:
             if training:
-                mask = tf.random.uniform(inputs.values.shape) < self._rate
-                return tf.RaggedTensor.from_row_limits(tf.where(mask, 0, inputs.values), inputs.row_limits())
+                mask = tf.random.uniform(inputs.values.shape)
+                return tf.RaggedTensor.from_row_limits(tf.where(mask < self._rate, 0, inputs.values), inputs.row_limits())
             else:
                 return inputs
 
@@ -55,7 +55,10 @@ class Model(tf.keras.Model):
 
         # With a probability of `args.word_masking`, replace the input word by an
         # unknown word (which has index 0).
-        word_ids = self.MaskElements(args.word_masking)(word_ids)
+        mask = tf.keras.layers.Dropout(args.word_masking)(tf.ones_like(word_ids, dtype=tf.float32))
+        word_ids = word_ids * tf.cast(mask, dtype=tf.int64)
+
+        # word_ids = self.MaskElements(args.word_masking)(word_ids)
 
         # Embed input words with dimensionality `args.we_dim`.
         embedded_words = tf.keras.layers.Embedding(train.forms.word_mapping.vocabulary_size(), args.we_dim)(word_ids)
@@ -115,10 +118,9 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
     tf.keras.utils.set_random_seed(args.seed)
     tf.config.threading.set_inter_op_parallelism_threads(args.threads)
     tf.config.threading.set_intra_op_parallelism_threads(args.threads)
-    tf.config.run_functions_eagerly(True)
     
     if args.debug:
-        tf.config.run_functions_eagerly(False)
+        tf.config.run_functions_eagerly(True)
         tf.data.experimental.enable_debug_mode()
 
     # Create logdir name
