@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from typing import Tuple, Dict
 import argparse
 import datetime
 import os
@@ -11,14 +12,51 @@ import tensorflow as tf
 import bboxes_utils
 from svhn_dataset import SVHN
 
-# TODO: Define reasonable defaults and optionally more parameters.
-# Also, you can set the number of threads to 0 to use all your CPU cores.
+from retina.retina_net import RetinaNet
+
 parser = argparse.ArgumentParser()
-parser.add_argument("--batch_size", default=..., type=int, help="Batch size.")
+parser.add_argument("--batch_size", default=10, type=int, help="Batch size.")
 parser.add_argument("--debug", default=False, action="store_true", help="If given, run functions eagerly.")
 parser.add_argument("--epochs", default=..., type=int, help="Number of epochs.")
 parser.add_argument("--seed", default=42, type=int, help="Random seed.")
-parser.add_argument("--threads", default=1, type=int, help="Maximum number of threads to use.")
+parser.add_argument("--threads", default=0, type=int, help="Maximum number of threads to use.")
+
+def parse_example(example: Dict[str,tf.Tensor]):
+    """Do a single image sample preprocessing re-sizing, augmentation, bounding boxes, label encoding, etc.)
+
+    Args:
+        example (Dict[tf.Tensor]): 
+            Image sample dictionary consisting of image data ("image") and ground truth - bounding boxes("bboxes") and classes("labels").
+
+    Return:
+        processed_sample (Tuple[tf.Tensor]): Preprocessed image sample as a tuple of - processed_image, true_cls, true_boxes
+    """         
+    processed_sample = None
+    true_boxes = None
+    true_cls = None
+    
+    print(example["image"].shape)
+
+    return example["image"], example["classes"],  example["bboxes"]
+
+def prepare_data(svhn: SVHN, args: argparse.Namespace):
+    
+    # def transform_example(example):
+    #     anchor_classes, anchor_bboxes = tf.numpy_function(
+    #         bboxes_utils.bboxes_training, [anchors, example["classes"], example["bboxes"], 0.5], (tf.int32, tf.float32))
+    #     anchor_classes = tf.ensure_shape(anchor_classes, [len(anchors)])
+    #     anchor_bboxes = tf.ensure_shape(anchor_bboxes, [len(anchors), 4])
+    
+    train = svhn.train.map(parse_example)
+    dev = svhn.dev.map(parse_example)
+    test = svhn.test.map(parse_example)
+    
+    # Generate batches
+    train = train.batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
+    dev = dev.batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
+    test = test.batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
+    
+    return train, dev, test
 
 
 def main(args: argparse.Namespace) -> None:
@@ -39,22 +77,13 @@ def main(args: argparse.Namespace) -> None:
 
     # Load the data
     svhn = SVHN()
+    
+    train, dev, test = prepare_data(svhn, args)
+    
+    model = RetinaNet(SVHN.LABELS, 9)
 
-    # Load the EfficientNetV2-B0 model. It assumes the input images are
-    # represented in [0-255] range using either `tf.uint8` or `tf.float32` type.
-    backbone = tf.keras.applications.EfficientNetV2B0(include_top=False)
-
-    # Extract features of different resolution. Assuming 224x224 input images
-    # (you can set this explicitly via `input_shape` of the above constructor),
-    # the below model returns five outputs with resolution 7x7, 14x14, 28x28, 56x56, 112x112.
-    backbone = tf.keras.Model(
-        inputs=backbone.input,
-        outputs=[backbone.get_layer(layer).output for layer in [
-             "top_activation", "block5e_add", "block3b_add", "block2b_add", "block1a_project_activation"]]
-    )
-
-    # TODO: Create the model and train it
-    model = ...
+    optimizer = 
+    model.compile(loss=loss_fn, optimizer=tf.optimizers.Adam())
 
     # Generate test set annotations, but in `args.logdir` to allow parallel execution.
     os.makedirs(args.logdir, exist_ok=True)
