@@ -1,63 +1,31 @@
 #!/usr/bin/env python3
-from typing import Tuple, Dict
 import argparse
 import datetime
 import os
 import re
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Report only TF errors by default
+from typing import *
+# Report only TF errors by default
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
-import numpy as np
 import tensorflow as tf
 
-import bboxes_utils
+from data_processing import DataProcessing
+from retina_net import RetinaNet, RetinaNetLoss
 from svhn_dataset import SVHN
 
-from retina.retina_net import RetinaNet
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--batch_size", default=10, type=int, help="Batch size.")
-parser.add_argument("--debug", default=False, action="store_true", help="If given, run functions eagerly.")
-parser.add_argument("--epochs", default=..., type=int, help="Number of epochs.")
+parser.add_argument("--debug", default=False, action="store_true",
+                    help="If given, run functions eagerly.")
+parser.add_argument("--epochs", default=5, type=int, help="Number of epochs.")
+parser.add_argument("--iou_threshold", default=0.5, type=float,
+                    help="Value of intersection of unions to consider the anchor for bbox.")
 parser.add_argument("--seed", default=42, type=int, help="Random seed.")
-parser.add_argument("--threads", default=0, type=int, help="Maximum number of threads to use.")
+parser.add_argument("--threads", default=0, type=int,
+                    help="Maximum number of threads to use.")
 
-def parse_example(example: Dict[str,tf.Tensor]):
-    """Do a single image sample preprocessing re-sizing, augmentation, bounding boxes, label encoding, etc.)
-
-    Args:
-        example (Dict[tf.Tensor]): 
-            Image sample dictionary consisting of image data ("image") and ground truth - bounding boxes("bboxes") and classes("labels").
-
-    Return:
-        processed_sample (Tuple[tf.Tensor]): Preprocessed image sample as a tuple of - processed_image, true_cls, true_boxes
-    """         
-    processed_sample = None
-    true_boxes = None
-    true_cls = None
-    
-    print(example["image"].shape)
-
-    return example["image"], example["classes"],  example["bboxes"]
-
-def prepare_data(svhn: SVHN, args: argparse.Namespace):
-    
-    # def transform_example(example):
-    #     anchor_classes, anchor_bboxes = tf.numpy_function(
-    #         bboxes_utils.bboxes_training, [anchors, example["classes"], example["bboxes"], 0.5], (tf.int32, tf.float32))
-    #     anchor_classes = tf.ensure_shape(anchor_classes, [len(anchors)])
-    #     anchor_bboxes = tf.ensure_shape(anchor_bboxes, [len(anchors), 4])
-    
-    train = svhn.train.map(parse_example)
-    dev = svhn.dev.map(parse_example)
-    test = svhn.test.map(parse_example)
-    
-    # Generate batches
-    train = train.batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
-    dev = dev.batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
-    test = test.batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
-    
-    return train, dev, test
-
+IMAGE_SIZE = 224
 
 def main(args: argparse.Namespace) -> None:
     # Set the random seed and the number of threads.
@@ -72,18 +40,34 @@ def main(args: argparse.Namespace) -> None:
     args.logdir = os.path.join("logs", "{}-{}-{}".format(
         os.path.basename(globals().get("__file__", "notebook")),
         datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S"),
-        ",".join(("{}={}".format(re.sub("(.)[^_]*_?", r"\1", k), v) for k, v in sorted(vars(args).items())))
+        ",".join(("{}={}".format(
+            re.sub("(.)[^_]*_?", r"\1", k), v) for k, v in sorted(vars(args).items())))
     ))
 
     # Load the data
     svhn = SVHN()
-    
-    train, dev, test = prepare_data(svhn, args)
-    
-    model = RetinaNet(SVHN.LABELS, 9)
 
-    optimizer = 
-    model.compile(loss=loss_fn, optimizer=tf.optimizers.Adam())
+    args.levels = [3,4,5]
+    args.ratios = [1.]
+    args.scales = [1.]
+    n_anchors = len(args.ratios) * len(args.scales)
+    dims = 128
+    
+    dataProcessing = DataProcessing(args)
+
+    train = dataProcessing.build_dataset(svhn, "train")
+    dev = dataProcessing.build_dataset(svhn, "dev")
+    test = dataProcessing.build_dataset(svhn, "test")
+
+    model = RetinaNet(SVHN.LABELS, n_anchors, dims, args.levels)
+
+    loss = RetinaNetLoss(SVHN.LABELS)
+
+    model.compile(optimizer=tf.optimizers.Adam(learning_rate=0.01, jit_compile=False),
+                  loss={"classes": loss.cls_loss, "bboxes": loss.bbox_loss}
+                  )
+
+    model.fit(train, epochs=args.epochs, validation_data=dev)
 
     # Generate test set annotations, but in `args.logdir` to allow parallel execution.
     os.makedirs(args.logdir, exist_ok=True)
