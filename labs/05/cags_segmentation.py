@@ -27,7 +27,7 @@ def main(args: argparse.Namespace) -> None:
     tf.config.threading.set_intra_op_parallelism_threads(args.threads)
     if args.debug:
         tf.config.run_functions_eagerly(True)
-        tf.data.experimental.enable_debug_mode()
+        # tf.data.experimental.enable_debug_mode()
 
     # Create logdir name
     args.logdir = os.path.join("logs", "{}-{}-{}".format(
@@ -50,7 +50,7 @@ def main(args: argparse.Namespace) -> None:
     backbone = tf.keras.Model(
         inputs=backbone.input,
         outputs=[backbone.get_layer(layer).output for layer in [
-             "top_activation", "block5e_add", "block3b_add", "block2b_add", "block1a_project_activation"]]
+            "top_activation", "block5e_add", "block3b_add", "block2b_add", "block1a_project_activation"]]
     )
 
     # TODO: Create the model and train it
