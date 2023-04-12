@@ -4,58 +4,46 @@ from bboxes_utils import BBOX
 
 from typing import *
 
-
 class RetinaNetLoss:
     class RetinaNetBBoxLoss(tf.losses.Loss):
         """Implements Smooth L1 loss"""
 
-        def __init__(self, delta):
-            super().__init__(
-                reduction=tf.keras.losses.Reduction.AUTO, name="RetinaNetBBoxLoss"
-            )
+        def __init__(self, delta, **kwargs):
+            super().__init__(**kwargs, name="RetinaNetBBoxLoss")
             self.delta = delta
             
         def call(self, y_true, y_pred):
-            positive_mask = tf.cast(tf.greater(
-                y_true[:, :, 4], -1.0), dtype=tf.float32)
-            y_true = y_true[:, :, :4]
+            positive_mask = tf.greater(y_true[..., BBOX], 0.0)
+            y_true = y_true[..., :BBOX]
 
-            difference = y_true - y_pred
-            absolute_difference = tf.abs(difference)
-            squared_difference = difference ** 2
-            loss = tf.where(
-                tf.less(absolute_difference, self.delta),
-                0.5 * squared_difference,
-                absolute_difference - 0.5,
-            )
-            loss = tf.reduce_sum(loss, axis=-1)
-            normalizer = tf.reduce_sum(positive_mask, axis=-1)
-            return tf.math.divide_no_nan(tf.reduce_sum(loss, axis=-1), normalizer)
+            loss = tf.keras.losses.huber(y_true, y_pred, self.delta)
+            
+            loss = tf.boolean_mask(loss, positive_mask)
+            return loss
         
         
     class RetinaNetClassificationLoss(tf.losses.Loss):
         """Implements Focal loss"""
 
-        def __init__(self, n_classes, alpha, gamma):
-            super().__init__(
-                reduction=tf.keras.losses.Reduction.AUTO, name="RetinaNetClassificationLoss"
-            )
+        def __init__(self, n_classes, alpha, gamma, **kwargs):
+            super().__init__(**kwargs, name="RetinaNetClassificationLoss")
             self.n_classes = n_classes
             self.alpha = alpha
             self.gamma = gamma
         
         def call(self, y_true, y_pred):
-            positive_mask = tf.greater(y_true[:, :, 4], -1.0)
+            positive_mask = tf.greater(y_true[..., BBOX], 0.0)
             y_true = tf.one_hot(
-                tf.cast(y_true[:, :, 4], dtype=tf.int32),
+                tf.cast(y_true[..., BBOX] - 1, dtype=tf.int32),
                 depth=self.n_classes,
                 dtype=tf.float32,
             )
+            y_pred = tf.cast(y_pred, tf.float32)
             
-            loss = tf.keras.losses.binary_focal_crossentropy(y_true, y_pred, apply_class_balancing=True,
+            loss = tf.keras.losses.binary_focal_crossentropy(y_true, y_pred,
                                                              alpha=self.alpha, gamma=self.gamma, 
                                                              from_logits=True, label_smoothing=0.1)
-            loss = tf.where(positive_mask, loss, 0.0)
+            loss = tf.boolean_mask(loss, positive_mask)
             return loss
     
     def __init__(self, n_classes, alpha = 0.25, gamma = 2.0, delta = 1.0):
@@ -137,5 +125,7 @@ class RetinaNet(tf.keras.Model):
 
         cls_out = tf.concat(cls_outs, axis=-2)
         bbox_out = tf.concat(bbox_outs, axis=-2)
+        
+        out = tf.concat([bbox_out, cls_out], axis=-1)
 
-        super().__init__(inputs=images, outputs={"classes": cls_out, "bboxes": bbox_out})
+        super().__init__(inputs=images, outputs=out)

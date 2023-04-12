@@ -134,6 +134,13 @@ def bboxes_from_fast_rcnn(anchors: tf.Tensor, fast_rcnns: tf.Tensor) -> tf.Tenso
         bbox_centers[..., 1] + bbox_sizes[..., 1] / 2.,  # bottom
         bbox_centers[..., 0] + bbox_sizes[..., 0] / 2.,  # right
     ], axis=-1)
+    
+def pack_label(classes, bboxes):
+    classes = tf.cast(classes[..., tf.newaxis], tf.float32)
+    return tf.concat([bboxes, classes], axis=-1)
+
+def unpack_label(label):
+    return {"classes": label[..., BBOX:], "bboxes": label[..., :BBOX]}
 
 def bboxes_training2(
         anchors: tf.Tensor, gold_classes: tf.Tensor, gold_bboxes: tf.Tensor, iou_object = 0.5, iou_background = 0.4

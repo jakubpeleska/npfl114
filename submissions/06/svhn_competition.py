@@ -12,6 +12,7 @@ import tensorflow as tf
 from data_processing import DataProcessing
 from retina_net import RetinaNet, RetinaNetLoss
 from svhn_dataset import SVHN
+from bboxes_utils import unpack_label
 
 
 parser = argparse.ArgumentParser()
@@ -47,7 +48,7 @@ def main(args: argparse.Namespace) -> None:
     # Load the data
     svhn = SVHN()
 
-    args.levels = [3,4,5]
+    args.levels = [4]
     args.ratios = [1.]
     args.scales = [1.]
     n_anchors = len(args.ratios) * len(args.scales)
@@ -62,9 +63,33 @@ def main(args: argparse.Namespace) -> None:
     model = RetinaNet(SVHN.LABELS, n_anchors, dims, args.levels)
 
     loss = RetinaNetLoss(SVHN.LABELS)
+    
+    def loss_fn(y_true, y_pred):
+        y_pred = unpack_label(y_pred)
+        y_pred_cls = y_pred['classes']
+        y_pred_bbox = y_pred['bboxes']
+        
+        # TODO: Fix this TEMPORARY placeholder
+        b_loss = tf.minimum(0.0, tf.reduce_max(y_pred_bbox))
+        return loss.cls_loss(y_true, y_pred_cls) + loss.bbox_loss(y_true, y_pred_bbox)
+    
+    def cls_accuracy(y_true, y_pred):
+        y_true = unpack_label(y_true)
+        y_pred = unpack_label(y_pred)
+        y_true = y_true['classes']
+        y_pred = y_pred['classes']
+        
+        positive_mask = tf.greater(y_true, 0.0)
+        
+        probs = tf.gather(tf.nn.sigmoid(y_pred), tf.cast(y_true, tf.int32) - 1)
+        
+        probs = tf.boolean_mask(probs, positive_mask)
+        
+        return tf.reduce_mean(probs, axis=-1)
 
-    model.compile(optimizer=tf.optimizers.Adam(learning_rate=0.01, jit_compile=False),
-                  loss={"classes": loss.cls_loss, "bboxes": loss.bbox_loss}
+    model.compile(optimizer=tf.optimizers.Adam(learning_rate=0.001, jit_compile=False),
+                  loss=loss_fn,
+                  metrics=[cls_accuracy]
                   )
 
     model.fit(train, epochs=args.epochs, validation_data=dev)
