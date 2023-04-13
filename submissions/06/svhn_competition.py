@@ -26,8 +26,6 @@ parser.add_argument("--seed", default=42, type=int, help="Random seed.")
 parser.add_argument("--threads", default=0, type=int,
                     help="Maximum number of threads to use.")
 
-IMAGE_SIZE = 224
-
 def main(args: argparse.Namespace) -> None:
     # Set the random seed and the number of threads.
     tf.keras.utils.set_random_seed(args.seed)
@@ -48,7 +46,7 @@ def main(args: argparse.Namespace) -> None:
     # Load the data
     svhn = SVHN()
 
-    args.levels = [4]
+    args.levels = [5]
     args.ratios = [1.]
     args.scales = [1.]
     n_anchors = len(args.ratios) * len(args.scales)
@@ -64,14 +62,17 @@ def main(args: argparse.Namespace) -> None:
 
     loss = RetinaNetLoss(SVHN.LABELS)
     
-    def loss_fn(y_true, y_pred):
+    def cls_loss(y_true, y_pred):
         y_pred = unpack_label(y_pred)
         y_pred_cls = y_pred['classes']
+        
+        return loss.cls_loss(y_true, y_pred_cls)
+    
+    def bbox_loss(y_true, y_pred):
+        y_pred = unpack_label(y_pred)
         y_pred_bbox = y_pred['bboxes']
         
-        # TODO: Fix this TEMPORARY placeholder
-        b_loss = tf.minimum(0.0, tf.reduce_max(y_pred_bbox))
-        return loss.cls_loss(y_true, y_pred_cls) + loss.bbox_loss(y_true, y_pred_bbox)
+        return loss.bbox_loss(y_true, y_pred_bbox)
     
     def cls_accuracy(y_true, y_pred):
         y_true = unpack_label(y_true)
@@ -88,7 +89,8 @@ def main(args: argparse.Namespace) -> None:
         return tf.reduce_mean(probs, axis=-1)
 
     model.compile(optimizer=tf.optimizers.Adam(learning_rate=0.001, jit_compile=False),
-                  loss=loss_fn,
+                  loss=[cls_loss, bbox_loss],
+                  loss_weights=[1.0, 1.],
                   metrics=[cls_accuracy]
                   )
 
