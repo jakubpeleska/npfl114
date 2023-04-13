@@ -81,7 +81,7 @@ class DataProcessing:
                 for ratio in self.ratios:
                     h = tf.math.sqrt(area / ratio)
                     w = tf.math.sqrt(area * ratio)
-                    anchor_offsets = [-h/2, w/2, h/2, w/2]
+                    anchor_offsets = [-h/2, -w/2, h/2, w/2]
                     level_anchors.append(centers + anchor_offsets)
 
             anchors.append(tf.concat(level_anchors, axis=0))
@@ -95,13 +95,13 @@ class DataProcessing:
         return image, classes, bboxes
 
     def image_augmentation(self, image, classes, bboxes):
-        image, shape, _ = resize_and_pad_image(image, jitter=[256,384])
+        image, _, ratio = resize_and_pad_image(image, jitter=[256,384])
         bboxes = tf.stack(
             [
-                bboxes[:, TOP] * shape[1],
-                bboxes[:, LEFT] * shape[0],
-                bboxes[:, BOTTOM] * shape[1],
-                bboxes[:, RIGHT] * shape[0],
+                bboxes[:, TOP] * ratio,
+                bboxes[:, LEFT] * ratio,
+                bboxes[:, BOTTOM] * ratio,
+                bboxes[:, RIGHT] * ratio,
             ],
             axis=-1,
         )
@@ -134,11 +134,11 @@ class DataProcessing:
 
         if dataset_name != 'test':
             # This is very important! We are padding to same shape per batch!
-            dataset = dataset.padded_batch(batch_size=self.batch_size, padding_values=(0.0, 0.0, 1e-8), drop_remainder=True)
+            dataset = dataset.padded_batch(batch_size=self.batch_size, padding_values=(0.0, -1.0, 1e-8), drop_remainder=True)
 
             dataset = dataset.map(self.labels_encoding)
         else:
-            dataset = dataset.padded_batch(batch_size=self.batch_size, padding_values=(0.0, 0.0, 1e-8))
+            dataset = dataset.padded_batch(batch_size=self.batch_size, padding_values=(0.0, -1.0, 1e-8))
 
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
