@@ -164,3 +164,6 @@ cython_debug/
 *.npz
 *.zip
 *.tfrecord
+
+# Models
+*.h5
