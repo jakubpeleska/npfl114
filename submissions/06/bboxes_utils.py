@@ -221,7 +221,7 @@ def bboxes_training2(
                             tf.gather(anchor_bboxes, tf.squeeze(anchors_used, axis=1)))
     )
 
-    return anchor_classes, anchor_bboxes
+    return pack_label(anchor_classes, anchor_bboxes)
 
 def bboxes_training(
         anchors: tf.Tensor, gold_classes: tf.Tensor, gold_bboxes: tf.Tensor, iou_threshold: float

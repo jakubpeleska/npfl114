@@ -20,6 +20,8 @@ class RetinaNetLoss:
             
             loss = tf.boolean_mask(loss, positive_mask)
             return loss
+            # normalizer = tf.reduce_sum(tf.cast(positive_mask, tf.int8), axis=-1)
+            # return tf.math.divide_no_nan(loss, normalizer)
         
         
     class RetinaNetClassificationLoss(tf.losses.Loss):
@@ -33,6 +35,8 @@ class RetinaNetLoss:
         
         def call(self, y_true, y_pred):
             positive_mask = tf.greater(y_true[..., BBOX], 0.0)
+            non_ignore_mask = tf.greater(y_true[..., BBOX], -1.0)
+            
             y_true = tf.one_hot(
                 tf.cast(y_true[..., BBOX] - 1, dtype=tf.int32),
                 depth=self.n_classes,
@@ -40,11 +44,16 @@ class RetinaNetLoss:
             )
             y_pred = tf.cast(y_pred, tf.float32)
             
-            loss = tf.keras.losses.binary_focal_crossentropy(y_true, y_pred,
+            loss = tf.keras.backend.binary_focal_crossentropy(y_true, y_pred, apply_class_balancing=True,
                                                              alpha=self.alpha, gamma=self.gamma, 
-                                                             from_logits=True, label_smoothing=0.1)
-            loss = tf.boolean_mask(loss, positive_mask)
-            return loss
+                                                             from_logits=True, )
+            
+            loss = tf.reduce_sum(loss, axis=-1)
+            loss = tf.where(non_ignore_mask, loss, 0.0)
+            loss = tf.where(positive_mask, loss*10, loss)
+            loss = tf.reduce_sum(loss, axis=-1)
+            normalizer = tf.reduce_sum(tf.cast(non_ignore_mask, tf.float32), axis=-1)
+            return tf.math.divide_no_nan(loss, normalizer)
     
     def __init__(self, n_classes, alpha = 0.25, gamma = 2.0, delta = 1.0):
         self.cls_loss = self.RetinaNetClassificationLoss(n_classes, alpha, gamma)

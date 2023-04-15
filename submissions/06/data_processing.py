@@ -4,7 +4,17 @@ import argparse
 from typing import *
 
 from svhn_dataset import SVHN
-from bboxes_utils import bboxes_training, TOP, LEFT, BOTTOM, RIGHT, BBOX
+from bboxes_utils import bboxes_training, bboxes_training2, unpack_label, TOP, LEFT, BOTTOM, RIGHT, BBOX
+
+def pad_image(image, stride=128.0):
+    image_shape = tf.cast(tf.shape(image)[:2], dtype=tf.float32)
+    padded_image_shape = tf.cast(
+        tf.math.ceil(image_shape / stride) * stride, dtype=tf.int32
+    )
+    image = tf.image.pad_to_bounding_box(
+        image, 0, 0, padded_image_shape[0], padded_image_shape[1]
+    )
+    return image
 
 def resize_and_pad_image(
     image, min_side=800.0, max_side=1333.0, jitter=[640, 1024], stride=128.0
@@ -89,13 +99,13 @@ class DataProcessing:
 
     def parse_example(self, example: Dict[str, tf.Tensor]):
         image, classes, bboxes = example["image"], example["classes"],  example["bboxes"]
-        image = tf.cast(image, tf.float32)
+        image = tf.cast(image, tf.float32) / 255
         classes = tf.cast(classes, tf.float32)
         bboxes = tf.cast(bboxes, tf.float32)
         return image, classes, bboxes
 
     def image_augmentation(self, image, classes, bboxes):
-        image, _, ratio = resize_and_pad_image(image, jitter=[256,384])
+        image, _, ratio = resize_and_pad_image(image, jitter=[200,512])
         bboxes = tf.stack(
             [
                 bboxes[:, TOP] * ratio,
@@ -114,7 +124,8 @@ class DataProcessing:
 
         labels = []
         for i in range(self.batch_size):
-            label = bboxes_training(anchors, batch_classes[i], batch_bboxes[i], self.iou_threshold)
+            label = bboxes_training2(anchors, batch_classes[i], batch_bboxes[i], 
+                                     iou_object=self.iou_threshold, iou_background=self.iou_threshold - 0.1)
             labels.append(label)
 
         labels = tf.convert_to_tensor(labels)
@@ -132,14 +143,27 @@ class DataProcessing:
 
         dataset = dataset.map(self.image_augmentation)
 
-        if dataset_name != 'test':
-            # This is very important! We are padding to same shape per batch!
-            dataset = dataset.padded_batch(batch_size=self.batch_size, padding_values=(0.0, -1.0, 1e-8), drop_remainder=True)
+        # This is very important! We are padding to same shape per batch!
+        dataset = dataset.padded_batch(batch_size=self.batch_size, padding_values=(0.0, -1.0, 1e-8), drop_remainder=True)
+        dataset = dataset.map(self.labels_encoding)
 
-            dataset = dataset.map(self.labels_encoding)
-        else:
-            dataset = dataset.padded_batch(batch_size=self.batch_size, padding_values=(0.0, -1.0, 1e-8))
+        # dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
-        dataset = dataset.prefetch(tf.data.AUTOTUNE)
+        return dataset
+    
+    def build_test_set(self, svhn: SVHN, name="test"):
+        dataset: tf.data.Dataset = getattr(svhn, name)
+        dataset = dataset.map(self.parse_example)
+        
+        def augmentation(image, classes, bboxes):
+            image = pad_image(image)
+            image = tf.keras.applications.efficientnet.preprocess_input(image)
+            return image, None
+
+        dataset = dataset.map(augmentation)
+        
+        dataset = dataset.batch(1)
+
+        # dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
         return dataset
