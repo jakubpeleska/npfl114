@@ -44,7 +44,7 @@ class Model(tf.keras.Model):
             if args.dropout > 0.0:
                 _x = tf.keras.layers.Dropout(args.dropout)(_x)
             
-            if i > 0 and i > args.skip_connections:
+            if i > 0 and args.skip_connections:
                 x += _x
             else:
                 x = _x
