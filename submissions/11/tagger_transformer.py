@@ -101,7 +101,15 @@ class Model(tf.keras.Model):
             # - the `0 <= pos < max_sentence_len` is the sentence index.
             # This order is the same as in the visualization on the slides, but
             # different from the original paper where `sin` and `cos` interleave.
+            pos = tf.range(0, )
+            
+            i = tf.range(0, self.dim / 2)
+            tf.sin(pos / 10_000 ** (2 * i / self.dim))
+            
+            j = tf.range(self.dim / 2, self.dim)
+            tf.cos(pos / 10_000 ** (2 * (j - self.dim / 2) / self.dim))
             raise NotImplementedError()
+            
 
     class Transformer(tf.keras.layers.Layer):
         def __init__(self, layers, dim, expansion, heads, dropout, *args, **kwargs):
@@ -112,12 +120,20 @@ class Model(tf.keras.Model):
             # - the required number of transformer layers, each consisting of
             #   - a layer normalization and a self-attention layer followed by a dropout layer,
             #   - a layer normalization and a FFN layer followed by a dropout layer.
+            self.PE_layer = Model.PositionalEmbedding(dim)
+            
+            self.transformer_blocks = []
+            for i in range(layers):
+                attention = Model.SelfAttention(dim, heads)
+                attention_layer = Model.SelfAttention(dim, heads)
+                self.transformer_blocks.append(())
 
         def get_config(self):
             return {name: getattr(self, name) for name in ["layers", "dim", "expansion", "heads", "dropout"]}
 
         def call(self, inputs, mask):
-            # TODO: First compute the positional embeddings.
+            # First compute the positional embeddings.
+            PE = self.PE_layer(inputs)
 
             # TODO: Add the positional embeddings to the `inputs` and then
             # perform the given number of transformer layers, composed of
@@ -127,17 +143,22 @@ class Model(tf.keras.Model):
             # the corresponding operation, apply dropout, and finally add this result
             # to the original sub-layer input. Note that the given `mask` should be
             # passed to the self-attention operation to ignore the padding words.
-            raise NotImplementedError()
+            inputs += PE
+            
+            for block in self.transformer_blocks:
+                pass
 
     def __init__(self, args, train):
         # Implement a transformer encoder network. The input `words` is
         # a RaggedTensor of strings, each batch example being a list of words.
         words = tf.keras.layers.Input(shape=[None], dtype=tf.string, ragged=True)
 
-        # TODO(tagger_we): Map strings in `words` to indices by using the `word_mapping` of `train.forms`.
+        # Map strings in `words` to indices by using the `word_mapping` of `train.forms`.
+        idxs = train.forms.word_mapping(words)
 
-        # TODO(tagger_we): Embed input words with dimensionality `args.we_dim`. Note that the `word_mapping`
+        # Embed input words with dimensionality `args.we_dim`. Note that the `word_mapping`
         # provides a `vocabulary_size()` call returning the number of unique words in the mapping.
+        embedded = tf.keras.layers.Embedding(train.forms.word_mapping.vocabulary_size(), args.we_dim)(idxs)
 
         # TODO: Call the Transformer layer:
         # - create a `Model.Transformer` layer, using suitable options from `args`
@@ -146,11 +167,18 @@ class Model(tf.keras.Model):
         #   to a dense one, and also pass the following argument as a mask:
         #     `mask=tf.sequence_mask(ragged_tensor_with_input_words_embeddings.row_lengths())`
         # - finally, convert the result back to a ragged tensor.
+        transformer_layer = Model.Transformer(args.transformer_layers, 
+                                              args.we_dim, 
+                                              args.transformer_expansion, 
+                                              args.transformer_heads, 
+                                              args.transformer_dropout)
+        transformer_out = transformer_layer(embedded.to_tensor(), mask=tf.sequence_mask(embedded.row_lengths()))
+        transformer_out = tf.RaggedTensor.from_tensor(transformer_out)
 
-        # TODO(tagger_we): Add a softmax classification layer into as many classes as there are unique
+        # Add a softmax classification layer into as many classes as there are unique
         # tags in the `word_mapping` of `train.tags`. Note that the Dense layer can process
         # a `RaggedTensor` without any problem.
-        predictions = ...
+        predictions = tf.keras.layers.Dense(train.tags.word_mapping.vocabulary_size(), activation=tf.nn.softmax)(transformer_out)
 
         # Check that the created predictions are a 3D tensor.
         assert predictions.shape.rank == 3
@@ -189,12 +217,14 @@ def main(args: argparse.Namespace) -> Dict[str, float]:
     # Create the model and train
     model = Model(args, morpho.train)
 
-    # TODO(tagger_we): Construct the data for the model, each consisting of the following pair:
+    # Construct the data for the model, each consisting of the following pair:
     # - a tensor of string words (forms) as input,
     # - a tensor of integer tag ids as targets.
     # To create the tag ids, use the `word_mapping` of `morpho.train.tags`.
     def extract_tagging_data(example):
-        raise NotImplementedError()
+        forms = example["forms"]
+        tag_ids = morpho.train.tags.word_mapping(example["tags"])
+        return forms, tag_ids
 
     def create_dataset(name):
         dataset = getattr(morpho, name).dataset
