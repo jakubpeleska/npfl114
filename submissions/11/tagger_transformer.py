@@ -33,54 +33,81 @@ class Model(tf.keras.Model):
         def __init__(self, dim, expansion, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.dim, self.expansion = dim, expansion
-            # TODO: Create the required layers -- first a ReLU-activated dense
+            # Create the required layers -- first a ReLU-activated dense
             # layer with `dim * expansion` units, followed by a dense layer
             # with `dim` units without an activation.
-            raise NotImplementedError()
+            self.hidden = tf.keras.layers.Dense(self.dim * self.expansion, activation='relu')
+            self.out = tf.keras.layers.Dense(self.dim)
 
         def get_config(self):
             return {"dim": self.dim, "expansion": self.expansion}
 
         def call(self, inputs):
-            # TODO: Execute the FFN Transformer layer.
-            raise NotImplementedError()
+            # Execute the FFN Transformer layer.
+            return self.out(self.hidden(inputs))
 
     class SelfAttention(tf.keras.layers.Layer):
         def __init__(self, dim, heads, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.dim, self.heads = dim, heads
-            # TODO: Create weight matrices W_Q, W_K, W_V, and W_O using `self.add_weight`,
+            self.dim_heads = self.dim // self.heads
+            # Create weight matrices W_Q, W_K, W_V, and W_O using `self.add_weight`,
             # each with shape `[dim, dim]`; keep the default for other `add_weight` arguments
             # (which means trainable float32 matrices initialized with `"glorot_uniform"`).
-            raise NotImplementedError()
+            self.W_Q = self.add_weight("W_Q", [dim, dim])
+            self.W_K = self.add_weight("W_K", [dim, dim])
+            self.W_V = self.add_weight("W_V", [dim, dim])
+            self.W_O = self.add_weight("W_O", [dim, dim])
 
         def get_config(self):
             return {"dim": self.dim, "heads": self.heads}
 
-        def call(self, inputs, mask):
-            # TODO: Execute the self-attention layer.
+        def call(self, inputs: tf.Tensor, mask):
+            sh = tf.shape(inputs)
+            batch_size, max_sentence_len = sh[0], sh[1]
+            # Execute the self-attention layer.
             #
             # Start by computing Q, K and V. In all cases:
             # - first multiply `inputs` by the corresponding weight matrix W_Q/W_K/W_V,
             # - reshape via `tf.reshape` to `[batch_size, max_sentence_len, heads, dim // heads]`,
             # - transpose via `tf.transpose` to `[batch_size, heads, max_sentence_len, dim // heads]`.
+            # print(inputs.shape, self.W_Q.shape)
+            Q = inputs @ self.W_Q
+            K = inputs @ self.W_K
+            V = inputs @ self.W_V
+            
+            Q = tf.reshape(Q, [batch_size, max_sentence_len, self.heads, self.dim_heads])
+            K = tf.reshape(K, [batch_size, max_sentence_len, self.heads, self.dim_heads])
+            V = tf.reshape(V, [batch_size, max_sentence_len, self.heads, self.dim_heads])
+            
+            Q = tf.transpose(Q, [0,2,1,3])
+            K = tf.transpose(K, [0,2,1,3])
+            V = tf.transpose(V, [0,2,1,3])
 
-            # TODO: Continue by computing the self-attention weights as Q @ K^T,
+            # Continue by computing the self-attention weights as Q @ K^T,
             # normalizing by the square root of `dim // heads`.
-
-            # TODO: Apply the softmax, but including a suitable mask ignoring all padding words.
+            x = Q @ tf.transpose(K, [0,1,3,2])
+            x /= tf.sqrt(tf.cast(self.dim_heads, tf.float32))
+            
+            # Apply the softmax, but including a suitable mask ignoring all padding words.
             # The original `mask` is a bool matrix of shape `[batch_size, max_sentence_len]`
             # indicating which words are valid (`True`) or padding (`False`).
             # To mask an input to softmax, replace it by -1e9 (theoretically we should use
             # minus infinity, but `tf.math.exp(-1e9)` is also zero because of limited precision).
-
-            # TODO: Finally,
+            mask = tf.cast(tf.cast(mask[:, None], tf.int32) * tf.cast(mask[:, None], tf.int32), tf.bool)
+            x = tf.nn.softmax(tf.where(mask[:, None], x, -1e9), axis=3)
+            
+            # Finally,
             # - take a weighted combination of values V according to the computed attention
             #   (using a suitable matrix multiplication),
             # - transpose the result to `[batch_size, max_sentence_len, heads, dim // heads]`,
             # - reshape to `[batch_size, max_sentence_len, dim]`,
             # - multiply the result by the W_O matrix.
-            raise NotImplementedError()
+            x = x @ V
+            x = tf.transpose(x, [0,2,1,3])
+            x = tf.reshape(x, [batch_size, max_sentence_len, self.dim])
+            return x @ self.W_O
+
 
     class PositionalEmbedding(tf.keras.layers.Layer):
         def __init__(self, dim, *args, **kwargs):
@@ -92,7 +119,8 @@ class Model(tf.keras.Model):
             return {"dim": self.dim}
 
         def call(self, inputs):
-            # TODO: Compute the sinusoidal positional embeddings.
+            max_sentence_len = tf.shape(inputs)[1]
+            # Compute the sinusoidal positional embeddings.
             # They have a shape `[max_sentence_len, self.dim]`, where `self.dim` is even and
             # - for `0 <= i < dim / 2`, the value on index `[pos, i]` should be
             #     `sin(pos / 10_000 ** (2 * i / dim))`
@@ -101,41 +129,43 @@ class Model(tf.keras.Model):
             # - the `0 <= pos < max_sentence_len` is the sentence index.
             # This order is the same as in the visualization on the slides, but
             # different from the original paper where `sin` and `cos` interleave.
-            pos = tf.range(0, )
+            pos = tf.range(0, max_sentence_len, dtype=tf.float32)
             
-            i = tf.range(0, self.dim / 2)
-            tf.sin(pos / 10_000 ** (2 * i / self.dim))
+            i = tf.range(0, self.dim // 2, dtype=tf.float32)
+            part1 = tf.sin(pos[:,None] / 10_000 ** (2 * i[None, :] / self.dim))
             
-            j = tf.range(self.dim / 2, self.dim)
-            tf.cos(pos / 10_000 ** (2 * (j - self.dim / 2) / self.dim))
-            raise NotImplementedError()
+            j = tf.range(self.dim // 2, self.dim, dtype=tf.float32)
+            part2 = tf.cos(pos[:,None] / 10_000 ** (2 * (j[None, :] - self.dim // 2) / self.dim))
+            
+            return tf.concat([part1, part2], axis=1) 
             
 
     class Transformer(tf.keras.layers.Layer):
         def __init__(self, layers, dim, expansion, heads, dropout, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.layers, self.dim, self.expansion, self.heads, self.dropout = layers, dim, expansion, heads, dropout
-            # TODO: Create:
+            # Create:
             # - the positional embedding layer;
             # - the required number of transformer layers, each consisting of
             #   - a layer normalization and a self-attention layer followed by a dropout layer,
             #   - a layer normalization and a FFN layer followed by a dropout layer.
-            self.PE_layer = Model.PositionalEmbedding(dim)
+            self.pe_layer = Model.PositionalEmbedding(self.dim)
             
-            self.transformer_blocks = []
-            for i in range(layers):
-                attention = Model.SelfAttention(dim, heads)
-                attention_layer = Model.SelfAttention(dim, heads)
-                self.transformer_blocks.append(())
+            self.layer_norm_sa = [tf.keras.layers.LayerNormalization() for _ in range(layers)]
+            self.self_attention = [Model.SelfAttention(self.dim, self.heads) for _ in range(layers)]
+            self.dropout_sa = [tf.keras.layers.Dropout(self.dropout) for _ in range(layers)]
+            self.layer_norm_ffn = [tf.keras.layers.LayerNormalization() for _ in range(layers)]
+            self.ffn_layers = [Model.FFN(self.dim, self.expansion) for _ in range(layers)]
+            self.dropout_ffn = [tf.keras.layers.Dropout(self.dropout) for _ in range(layers)]
 
         def get_config(self):
             return {name: getattr(self, name) for name in ["layers", "dim", "expansion", "heads", "dropout"]}
 
         def call(self, inputs, mask):
             # First compute the positional embeddings.
-            PE = self.PE_layer(inputs)
+            pe = self.pe_layer(inputs)
 
-            # TODO: Add the positional embeddings to the `inputs` and then
+            # Add the positional embeddings to the `inputs` and then
             # perform the given number of transformer layers, composed of
             # - a self-attention sub-layer, followed by
             # - a FFN sub-layer.
@@ -143,10 +173,26 @@ class Model(tf.keras.Model):
             # the corresponding operation, apply dropout, and finally add this result
             # to the original sub-layer input. Note that the given `mask` should be
             # passed to the self-attention operation to ignore the padding words.
-            inputs += PE
+            inputs += pe
             
-            for block in self.transformer_blocks:
-                pass
+            x = inputs
+            
+            for i in range(self.layers):
+                sa = x
+                sa = self.layer_norm_sa[i](sa)
+                sa = self.self_attention[i](sa, mask)
+                sa = self.dropout_sa[i](sa)
+                
+                x += sa
+                
+                ffn = x
+                ffn = self.layer_norm_ffn[i](ffn)
+                ffn = self.ffn_layers[i](ffn)
+                ffn = self.dropout_ffn[i](ffn)
+                
+                x += ffn
+                
+            return x
 
     def __init__(self, args, train):
         # Implement a transformer encoder network. The input `words` is
@@ -160,7 +206,7 @@ class Model(tf.keras.Model):
         # provides a `vocabulary_size()` call returning the number of unique words in the mapping.
         embedded = tf.keras.layers.Embedding(train.forms.word_mapping.vocabulary_size(), args.we_dim)(idxs)
 
-        # TODO: Call the Transformer layer:
+        # Call the Transformer layer:
         # - create a `Model.Transformer` layer, using suitable options from `args`
         #   (using `args.we_dim` for the `dim` argument),
         # - when calling the layer, convert the ragged tensor with the input words embedding
@@ -172,8 +218,10 @@ class Model(tf.keras.Model):
                                               args.transformer_expansion, 
                                               args.transformer_heads, 
                                               args.transformer_dropout)
-        transformer_out = transformer_layer(embedded.to_tensor(), mask=tf.sequence_mask(embedded.row_lengths()))
-        transformer_out = tf.RaggedTensor.from_tensor(transformer_out)
+        row_lengths = embedded.row_lengths()
+        mask = tf.sequence_mask(row_lengths)
+        transformer_out = transformer_layer(embedded.to_tensor(), mask)
+        transformer_out = tf.RaggedTensor.from_tensor(transformer_out, row_lengths)
 
         # Add a softmax classification layer into as many classes as there are unique
         # tags in the `word_mapping` of `train.tags`. Note that the Dense layer can process
