@@ -10,22 +10,52 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Report only TF errors by d
 import numpy as np
 import tensorflow as tf
 
+import functools
+from scipy import ndimage
+import random
+
 from modelnet import ModelNet
 from cnn_model import CNNModel
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--batch_size", default=10, type=int, help="Batch size.")
 parser.add_argument("--debug", default=False, action="store_true", help="If given, run functions eagerly.")
+parser.add_argument("--evaluate", default=False, action="store_true", help="Evaluate model only.")
 parser.add_argument("--epochs", default=25, type=int, help="Number of epochs.")
 parser.add_argument("--modelnet", default=20, type=int, help="ModelNet dimension.")
 parser.add_argument("--seed", default=42, type=int, help="Random seed.")
 parser.add_argument("--threads", default=1, type=int, help="Maximum number of threads to use.")
 parser.add_argument("--weights_file", default="weights.h5", type=str, help="Name of file for saving the trained weights.")
 
+@tf.function
+def rotate(volume):
+    """Rotate the volume by a few degrees"""
+
+    def scipy_rotate(volume):
+        # define some rotation angles
+        axes = [(0,1), (1,2), (0,2)]
+        # pick angles at random
+        angle = tf.random.uniform([1], -45, 45)
+        # rotate volume
+        volume = ndimage.rotate(volume, angle[0], axes=random.choice(axes), reshape=False)
+        volume[volume < 0] = 0
+        volume[volume > 1] = 1
+        return volume
+
+    augmented_volume = tf.numpy_function(scipy_rotate, [volume], tf.float32)
+    return augmented_volume
+
+def augmentation(volume: tf.Tensor, label):
+    volume = tf.cast(volume, tf.float32)
+    volume = rotate(volume)
+    return volume, label
+
 def process_data(modelnet: ModelNet, args: argparse.Namespace):
     train = tf.data.Dataset.from_tensor_slices((modelnet.train.data["voxels"], modelnet.train.data["labels"]))
     dev = tf.data.Dataset.from_tensor_slices((modelnet.dev.data["voxels"], modelnet.dev.data["labels"]))
     test = tf.data.Dataset.from_tensor_slices(modelnet.test.data["voxels"])
+    
+    train = train.map(augmentation)
     
     # Use only the first 5000 images, shuffle them and change type from tf.uint8 to tf.float32.
     train = train.shuffle(5000, seed=args.seed)
@@ -103,10 +133,14 @@ def main(args: argparse.Namespace) -> None:
 
     # Create model
     model = CNNModel([modelnet.D, modelnet.H, modelnet.W, modelnet.C], len(modelnet.LABELS),
-                     f"{block1},{block2},{block3},{lin_class}", 
+                     f"{block1},{block2},{block3},{block4},{lin_class}", 
                      dim=3, logdir=args.logdir)
     
-    # model.summary()
+    model.compile(
+            optimizer=tf.optimizers.Adam(0.00001),
+            loss=tf.losses.SparseCategoricalCrossentropy(),
+            metrics=[tf.metrics.SparseCategoricalAccuracy(name="accuracy")],
+        )
     
     weights_file = args.weights_file
     
@@ -116,14 +150,16 @@ def main(args: argparse.Namespace) -> None:
                                                       save_weights_only=True,
                                                       save_best_only=True)
     
-    # Learn model
-    model.fit(train, 
-              epochs=args.epochs, 
-              validation_data=dev,
-              callbacks=[model.tb_callback, checkpoint_cb]
-              )
+    if not args.evaluate:
+        model.load_weights(weights_file)
+        # Learn model
+        model.fit(train, 
+                epochs=args.epochs, 
+                validation_data=dev,
+                callbacks=[model.tb_callback, checkpoint_cb]
+                )
     
-    model.load_weights(weights_file, True)
+    model.load_weights(weights_file)
 
     # Generate test set annotations, but in `args.logdir` to allow parallel execution.
     os.makedirs(args.logdir, exist_ok=True)

@@ -79,15 +79,14 @@ class CNNModel(tf.keras.Model):
 
         hidden = next_inputs
 
-        # Add the final output layer
-        outputs = tf.keras.layers.Dense(out_shape, activation=tf.nn.softmax)(hidden)
+        if out_shape is not None:
+            # Add the final output layer
+            outputs = tf.keras.layers.Dense(out_shape, activation=tf.nn.softmax)(hidden)
+        else:
+            outputs = hidden
 
         super().__init__(inputs=inputs, outputs=outputs)
-        self.compile(
-            optimizer=tf.optimizers.Adam(jit_compile=False),
-            loss=tf.losses.SparseCategoricalCrossentropy(),
-            metrics=[tf.metrics.SparseCategoricalAccuracy(name="accuracy")],
-        )
+        
         if logdir is not None:
             self.tb_callback = tf.keras.callbacks.TensorBoard(logdir, histogram_freq=1)
         
