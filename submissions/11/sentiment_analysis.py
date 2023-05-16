@@ -68,7 +68,7 @@ def main(args: argparse.Namespace) -> None:
         attention_mask: tf.RaggedTensor = tf.ragged.constant(attention_mask)
         attention_mask = attention_mask.to_tensor()
         
-        dataset = tf.data.Dataset.from_tensor_slices(((input_ids, attention_mask), labels))
+        dataset = tf.data.Dataset.from_tensor_slices((input_ids, labels))
         dataset = dataset.shuffle(len(dataset), seed=args.seed) if name == "train" else dataset
         dataset = dataset.batch(args.batch_size)
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
@@ -77,11 +77,10 @@ def main(args: argparse.Namespace) -> None:
     train, dev, test = create_dataset('train'), create_dataset('dev'), create_dataset('test')
     
     input_ids = tf.keras.Input(shape=[None], dtype=tf.int32)
-    attention_mask = tf.keras.Input(shape=[None], dtype=tf.int32)
-    x = eleczech(input_ids, attention_mask, training=True)
+    x = eleczech(input_ids, training=True)
     x = tf.keras.layers.GlobalAveragePooling1D()(x.last_hidden_state)
     outputs = tf.keras.layers.Dense(3, activation=tf.nn.softmax)(x)
-    model = tf.keras.Model((input_ids, attention_mask), outputs)
+    model = tf.keras.Model(input_ids, outputs)
     
     model.compile(
             optimizer=tf.optimizers.Adam(0.00005),
