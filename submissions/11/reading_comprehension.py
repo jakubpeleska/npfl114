@@ -20,9 +20,33 @@ parser.add_argument("--epochs", default=2, type=int, help="Number of epochs.")
 parser.add_argument("--seed", default=42, type=int, help="Random seed.")
 parser.add_argument("--threads", default=0, type=int, help="Maximum number of threads to use.")
 parser.add_argument("--evaluate", default=False, action="store_true", help="Do not train, only load trained weights and evaluate test set.")
-parser.add_argument("--lr", default=0.00002, type=float, help="Learning rate.")
+parser.add_argument("--lr", default=0.00001, type=float, help="Learning rate.")
 parser.add_argument("--load_weights", default="weights.h5", type=str, help="Load pre-trained weights.")
 parser.add_argument("--weights_file", default="weights.h5", type=str, help="Name of file for saving the trained weights.")
+
+
+class TupleSparseLogitAccuracy(tf.metrics.Mean):
+    def __init__(self, name: str = "tuple_sparse_logit_accuracy", dtype = None) -> None:
+        super().__init__(name, dtype)
+
+    def update_state(self, y_true: tf.Tensor, logits: tf.Tensor, sample_weight = None) -> None:
+        y_true = tf.cast(y_true, tf.int64)
+        
+        start_logits = logits[:, 0]
+        end_logits = logits[:, 1]
+        
+        start_idx = tf.argmax(start_logits, axis=-1, output_type=tf.int64)
+        
+        mask = tf.sequence_mask(start_idx, tf.shape(end_logits)[-1])
+        end_logits = tf.where(mask, -1e9, end_logits)
+        end_idx = tf.argmax(end_logits, axis=-1, output_type=tf.int64)
+
+        start_mask = y_true[:, 0] == start_idx
+        end_mask = y_true[:, 1] == end_idx
+        
+        matched = tf.logical_and(start_mask, end_mask)
+        
+        return super().update_state(matched, sample_weight)
 
 class Model(tf.keras.Model):
     def __init__(self, robeczech: transformers.TFPreTrainedModel, tokenizer: transformers.PreTrainedTokenizer):
@@ -32,12 +56,11 @@ class Model(tf.keras.Model):
         y = robeczech(input_ids=x, attention_mask=mask).last_hidden_state
 
         sep_idx = tf.where(x == tokenizer.sep_token_id)
-        sep_idx = tf.reshape(sep_idx, (-1, 2, 2))[:, 0, 1]
 
-        y_ctx = tf.RaggedTensor.from_tensor(y, lengths=sep_idx)
+        y_ctx = tf.RaggedTensor.from_tensor(y, lengths=sep_idx[::2, 1])
 
-        y_start = tf.keras.layers.Dense(1)(y_ctx)[..., 0]
-        y_end = tf.keras.layers.Dense(1)(y_ctx)[..., 0]
+        y_start: tf.RaggedTensor = tf.keras.layers.Dense(1)(y_ctx)[..., 0]
+        y_end: tf.RaggedTensor = tf.keras.layers.Dense(1)(y_ctx)[..., 0]
 
         y_start = y_start.to_tensor(default_value=-1e9)
         y_end = y_end.to_tensor(default_value=-1e9)
@@ -129,7 +152,7 @@ def main(args: argparse.Namespace) -> None:
     
     weights_file = args.weights_file
     
-    metrics = [tf.metrics.SparseCategoricalAccuracy(name="accuracy")]
+    metrics = [TupleSparseLogitAccuracy(name="accuracy")]
     
     checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(weights_file, 
                                                        save_best_only=True, 
@@ -151,13 +174,17 @@ def main(args: argparse.Namespace) -> None:
 
     model.load_weights(weights_file, True, True)
     
+    dev_metrics = model.evaluate(dev)
+    
+    print(f'dev metrics: {dev_metrics}')
+    
     test, questions = create_dataset('test')
 
     # Generate test set annotations, but in `args.logdir` to allow parallel execution.
     os.makedirs(args.logdir, exist_ok=True)
     with open(os.path.join(args.logdir, "reading_comprehension.txt"), "w", encoding="utf-8") as predictions_file:
         
-        logits = model.predict(test)
+        logits: tf.RaggedTensor = model.predict(test)
         logits = logits.to_tensor(default_value=-1e9)
         start_logits = logits[:, 0]
         end_logits = logits[:, 1]
