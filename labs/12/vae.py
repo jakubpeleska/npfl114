@@ -3,7 +3,7 @@ import argparse
 import datetime
 import os
 import re
-from typing import Any, Dict
+from typing import Dict
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Report only TF errors by default
 
 import numpy as np
@@ -43,7 +43,7 @@ class VAE(tf.keras.Model):
         # - flattens them
         # - applies `len(args.encoder_layers)` dense layers with ReLU activation,
         #   i-th layer with `args.encoder_layers[i]` units
-        # - generate two outputs `z_mean` and `z_sd`, each passing the result
+        # - generates two outputs `z_mean` and `z_sd`, each passing the result
         #   of the above bullet through its own dense layer of `args.z_dim` units,
         #   with `z_sd` using exponential function as activation to keep it positive.
         self.encoder = ...
@@ -76,14 +76,14 @@ class VAE(tf.keras.Model):
 
             # TODO: Decode images using `z` (also passing `training=True` to the `self.decoder`).
 
-            # TODO: Define `reconstruction_loss` using the `self.compiled_loss`.
+            # TODO: Compute `reconstruction_loss` using the `self.compiled_loss`.
             reconstruction_loss = ...
 
-            # TODO: Define `latent_loss` as a mean of KL divergences of suitable distributions.
+            # TODO: Compute `latent_loss` as a mean of KL divergences of suitable distributions.
             # Note that the `tfp` distributions offer a method `kl_divergence`.
             latent_loss = ...
 
-            # TODO: Define `loss` as a sum of the `reconstruction_loss` (multiplied by the number
+            # TODO: Compute `loss` as a sum of the `reconstruction_loss` (multiplied by the number
             # of pixels in an image) and the `latent_loss` (multiplied by self._z_dim).
             loss = ...
 
@@ -113,10 +113,11 @@ class VAE(tf.keras.Model):
         interpolated_images = self.decoder(interpolated_z, training=False)
 
         # Stack the random images, then an empty row, and finally interpolated images
-        image = tf.concat(
-            [tf.concat(list(images), axis=1) for images in tf.split(random_images, GRID)]
-            + [tf.zeros([MNIST.H, MNIST.W * GRID, MNIST.C])]
-            + [tf.concat(list(images), axis=1) for images in tf.split(interpolated_images, GRID)], axis=0)
+        image = tf.concat([
+            tf.concat([tf.concat(list(images), axis=1) for images in tf.split(random_images, GRID)], axis=0),
+            tf.zeros([MNIST.H * GRID, MNIST.W, MNIST.C]),
+            tf.concat([tf.concat(list(images), axis=1) for images in tf.split(interpolated_images, GRID)], axis=0),
+        ], axis=1)
         with self.tb_callback._train_writer.as_default(step=epoch):
             tf.summary.image("images", image[tf.newaxis])
 
