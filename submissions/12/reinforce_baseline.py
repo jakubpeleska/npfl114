@@ -14,13 +14,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--debug", default=False, action="store_true", help="If given, run functions eagerly.")
 parser.add_argument("--recodex", default=False, action="store_true", help="Running in ReCodEx")
 parser.add_argument("--render_each", default=0, type=int, help="Render some episodes.")
-parser.add_argument("--seed", default=0, type=int, help="Random seed.")
+parser.add_argument("--seed", default=111, type=int, help="Random seed.")
 parser.add_argument("--threads", default=0, type=int, help="Maximum number of threads to use.")
 # For these and any other arguments you add, ReCodEx will keep your default value.
 parser.add_argument("--batch_size", default=1, type=int, help="Batch size.")
 parser.add_argument("--episodes", default=200, type=int, help="Training episodes.")
 parser.add_argument("--hidden_layer_size", default=128, type=int, help="Size of hidden layer.")
-parser.add_argument("--learning_rate", default=0.005, type=float, help="Learning rate.")
+parser.add_argument("--learning_rate", default=0.004, type=float, help="Learning rate.")
 
 
 class Agent:
@@ -42,18 +42,18 @@ class Agent:
         #
         # Using Adam optimizer with given `args.learning_rate` is a good default.
         self._model.compile(
-            optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate),
+            optimizer=tf.keras.optimizers.Adam(learning_rate=0.0015),
             loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         )
         
         input = tf.keras.layers.Input(env.observation_space.shape)
-        x = tf.keras.layers.Dense(args.hidden_layer_size)(input)
+        x = tf.keras.layers.Dense(128)(input)
         out = tf.keras.layers.Dense(1)(x)
         self._baseline = tf.keras.Model(inputs=input, outputs=out)
         #
         # Using Adam optimizer with given `args.learning_rate` is a good default.
         self._baseline.compile(
-            optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate),
+            optimizer=tf.keras.optimizers.Adam(learning_rate=0.005),
             loss=tf.keras.losses.MeanSquaredError()
         )
 
