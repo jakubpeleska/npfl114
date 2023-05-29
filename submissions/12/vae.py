@@ -38,7 +38,7 @@ class VAE(tf.keras.Model):
         self._z_dim = args.z_dim
         self._z_prior = tfp.distributions.Normal(tf.zeros(args.z_dim), tf.ones(args.z_dim))
 
-        # TODO: Define `self.encoder` as a `tf.keras.Model`, which
+        # Define `self.encoder` as a `tf.keras.Model`, which
         # - takes input images with shape `[MNIST.H, MNIST.W, MNIST.C]`
         # - flattens them
         # - applies `len(args.encoder_layers)` dense layers with ReLU activation,
@@ -46,25 +46,38 @@ class VAE(tf.keras.Model):
         # - generates two outputs `z_mean` and `z_sd`, each passing the result
         #   of the above bullet through its own dense layer of `args.z_dim` units,
         #   with `z_sd` using exponential function as activation to keep it positive.
-        self.encoder = ...
+        encoder_input = tf.keras.Input([MNIST.H, MNIST.W, MNIST.C])
+        encoder_x = tf.keras.layers.Flatten()(encoder_input)
+        for i in range(len(args.encoder_layers)):
+            encoder_x = tf.keras.layers.Dense(args.encoder_layers[i], activation=tf.nn.relu)(encoder_x)
+        z_mean = tf.keras.layers.Dense(args.z_dim)(encoder_x)
+        z_sd = tf.keras.layers.Dense(args.z_dim, activation=tf.exp)(encoder_x)
+        self.encoder = tf.keras.Model(inputs=encoder_input, outputs=[z_mean, z_sd])
 
-        # TODO: Define `self.decoder` as a `tf.keras.Model`, which
+        # Define `self.decoder` as a `tf.keras.Model`, which
         # - takes vectors of `[args.z_dim]` shape on input
         # - applies `len(args.decoder_layers)` dense layers with ReLU activation,
         #   i-th layer with `args.decoder_layers[i]` units
         # - applies output dense layer with `MNIST.H * MNIST.W * MNIST.C` units
         #   and a suitable output activation
         # - reshapes the output (`tf.keras.layers.Reshape`) to `[MNIST.H, MNIST.W, MNIST.C]`
-        self.decoder = ...
+        decoder_input = tf.keras.Input([args.z_dim])
+        decoder_x = decoder_input
+        for i in range(len(args.decoder_layers)):
+            decoder_x = tf.keras.layers.Dense(args.decoder_layers[i], activation=tf.nn.relu)(decoder_x)
+        decoder_x = tf.keras.layers.Dense(MNIST.H * MNIST.W * MNIST.C, activation=tf.nn.sigmoid)(decoder_x)
+        decoder_out = tf.keras.layers.Reshape([MNIST.H, MNIST.W, MNIST.C])(decoder_x)
+        self.decoder = tf.keras.Model(inputs=decoder_input, outputs=decoder_out)
 
         self.tb_callback = tf.keras.callbacks.TensorBoard(args.logdir)
 
     def train_step(self, images: tf.Tensor) -> Dict[str, tf.Tensor]:
         with tf.GradientTape() as tape:
-            # TODO: Compute `z_mean` and `z_sd` of the given images using `self.encoder`.
+            # Compute `z_mean` and `z_sd` of the given images using `self.encoder`.
             # Note that you should pass `training=True` to the `self.encoder`.
+            z_mean, z_sd = self.encoder(images, training=True)
 
-            # TODO: Sample `z` from a Normal distribution with mean `z_mean` and
+            # Sample `z` from a Normal distribution with mean `z_mean` and
             # standard deviation `z_sd`. Start by creating corresponding
             # distribution `tfp.distributions.Normal(...)` and then run the
             # `sample(seed=self._seed)` method.
@@ -73,22 +86,28 @@ class VAE(tf.keras.Model):
             # so you do not need to implement the reparametrization trick manually.
             # For a given distribution, you can use the `reparameterization_type` member
             # to check if it is reparametrized or not.
+            approx_posterior = tfp.distributions.Normal(z_mean, z_sd)
+            z = approx_posterior.sample(seed=self._seed)
 
-            # TODO: Decode images using `z` (also passing `training=True` to the `self.decoder`).
+            # Decode images using `z` (also passing `training=True` to the `self.decoder`).
+            pred_images = self.decoder(z, training=True)
 
-            # TODO: Compute `reconstruction_loss` using the `self.compiled_loss`.
-            reconstruction_loss = ...
+            # Compute `reconstruction_loss` using the `self.compiled_loss`.
+            reconstruction_loss = self.compiled_loss(images, pred_images)
 
-            # TODO: Compute `latent_loss` as a mean of KL divergences of suitable distributions.
+            # Compute `latent_loss` as a mean of KL divergences of suitable distributions.
             # Note that the `tfp` distributions offer a method `kl_divergence`.
-            latent_loss = ...
+            latent_loss = tfp.distributions.kl_divergence(approx_posterior, self._z_prior)
+            latent_loss = tf.reduce_mean(latent_loss)
 
-            # TODO: Compute `loss` as a sum of the `reconstruction_loss` (multiplied by the number
+            # Compute `loss` as a sum of the `reconstruction_loss` (multiplied by the number
             # of pixels in an image) and the `latent_loss` (multiplied by self._z_dim).
-            loss = ...
+            n_pixels = MNIST.H * MNIST.W
+            loss = reconstruction_loss * n_pixels  + latent_loss * self._z_dim
 
-        # TODO: Perform a single optimizer step, with respect to trainable variables
+        # Perform a single optimizer step, with respect to trainable variables
         # of both the encoder and the decoder.
+        self.optimizer.minimize(loss, self.variables, tape=tape)
 
         return {"reconstruction_loss": reconstruction_loss, "latent_loss": latent_loss, "loss": loss}
 
