@@ -36,7 +36,7 @@ class GAN(tf.keras.Model):
         self._z_dim = args.z_dim
         self._z_prior = tfp.distributions.Normal(tf.zeros(args.z_dim), tf.ones(args.z_dim))
 
-        # TODO: Define `self.generator` as a `tf.keras.Model`, which
+        # Define `self.generator` as a `tf.keras.Model`, which
         # - takes vectors of shape `[args.z_dim]` on input
         # - applies batch normalized dense layer with 1_024 units and ReLU
         #   (do not forget about `use_bias=False` before every batch normalization)
@@ -46,8 +46,25 @@ class GAN(tf.keras.Model):
         #   stride 2, same padding, and ReLU activation (again `use_bias=False`)
         # - applies transposed convolution with `MNIST.C` filters, kernel size 4,
         #   stride 2, same padding, and a suitable output activation
+        gen_input =  tf.keras.Input([args.z_dim])
+        gen_x = tf.keras.layers.Dense(1024, use_bias=False)(gen_input)
+        gen_x = tf.keras.layers.BatchNormalization()(gen_x)
+        gen_x = tf.keras.layers.ReLU()(gen_x)
+        
+        gen_x = tf.keras.layers.Dense(MNIST.H // 4 * MNIST.W // 4 * 64, use_bias=False)(gen_x)
+        gen_x = tf.keras.layers.BatchNormalization()(gen_x)
+        gen_x = tf.keras.layers.ReLU()(gen_x)
+        
+        gen_x = tf.keras.layers.Reshape([MNIST.H // 4, MNIST.W // 4, 64])(gen_x)
+        
+        gen_x = tf.keras.layers.Conv2DTranspose(32, 4, 2, 'same', use_bias=False)(gen_x)
+        gen_x = tf.keras.layers.BatchNormalization()(gen_x)
+        gen_x = tf.keras.layers.ReLU()(gen_x)
+        
+        gen_out = tf.keras.layers.Conv2DTranspose(MNIST.C, 4, 2, 'same', activation=tf.nn.sigmoid)(gen_x)
+        self.generator = tf.keras.Model(inputs=gen_input, outputs=gen_out)
 
-        # TODO: Define `self.discriminator` as a `tf.keras.Model`, which
+        # Define `self.discriminator` as a `tf.keras.Model`, which
         # - takes input images with shape `[MNIST.H, MNIST.W, MNIST.C]`
         # - computes batch normalized convolution with 32 filters, kernel size 5,
         #   same padding, and ReLU activation (again, do not forget about
@@ -59,6 +76,26 @@ class GAN(tf.keras.Model):
         # - flattens the current representation
         # - applies batch normalized dense layer with 1_024 units and ReLU activation
         # - applies output dense layer with one output and a suitable activation function
+        dis_input = tf.keras.Input([MNIST.H, MNIST.W, MNIST.C])
+        
+        dis_x = tf.keras.layers.Conv2D(32, 5, 1, 'same', use_bias=False)(dis_input)
+        dis_x = tf.keras.layers.BatchNormalization()(dis_x)
+        dis_x = tf.keras.layers.ReLU()(dis_x)
+        dis_x = tf.keras.layers.MaxPool2D(2,2)(dis_x)
+        
+        dis_x = tf.keras.layers.Conv2D(64, 5, 1, 'same', use_bias=False)(dis_x)
+        dis_x = tf.keras.layers.BatchNormalization()(dis_x)
+        dis_x = tf.keras.layers.ReLU()(dis_x)
+        dis_x = tf.keras.layers.MaxPool2D(2,2)(dis_x)
+        
+        dis_x = tf.keras.layers.Flatten()(dis_x)
+        
+        dis_x = tf.keras.layers.Dense(1024, use_bias=False)(dis_x)
+        dis_x = tf.keras.layers.BatchNormalization()(dis_x)
+        dis_x = tf.keras.layers.ReLU()(dis_x)
+        
+        dis_out = tf.keras.layers.Dense(1, activation=tf.nn.sigmoid)(dis_x)
+        self.discriminator = tf.keras.Model(inputs=dis_input, outputs=dis_out)
 
         self.tb_callback = tf.keras.callbacks.TensorBoard(args.logdir)
 
@@ -75,7 +112,7 @@ class GAN(tf.keras.Model):
         self.generator_optimizer = generator_optimizer
 
     def train_step(self, images: tf.Tensor) -> Dict[str, tf.Tensor]:
-        # TODO(gan): Generator training. With a Gradient tape:
+        # Generator training. With a Gradient tape:
         # - generate as many random latent samples as there are `images`, by a single call
         #   to `self._z_prior.sample`; also pass `seed=self._seed` for replicability;
         # - pass the samples through a generator; do not forget about `training=True`
@@ -85,8 +122,16 @@ class GAN(tf.keras.Model):
         #   (`tf.ones_like` might come handy).
         # Then, run an optimizer step with respect to generator trainable variables.
         # Do not forget that we created generator_optimizer in the `compile` override.
+        with tf.GradientTape() as generator_tape:
+            n_samples = tf.shape(images)[0]
+            latent_samples = self._z_prior.sample([n_samples,],seed=self._seed)
+            generated_images = self.generator(latent_samples, training=True)
+            discriminated_samples = self.discriminator(generated_images, training=True)
+            generator_loss = self.compiled_loss(tf.ones([n_samples,]), discriminated_samples)
+            
+        self.generator_optimizer.minimize(generator_loss, self.generator.variables, tape=generator_tape)
 
-        # TODO(gan): Discriminator training. Using a Gradient tape:
+        # Discriminator training. Using a Gradient tape:
         # - discriminate `images` with `training=True`, storing
         #   results in `discriminated_real`
         # - discriminate images generated in generator training with `training=True`,
@@ -96,10 +141,20 @@ class GAN(tf.keras.Model):
         #   - `self.compiled_loss` on `discriminated_fake` with suitable targets.
         # Then, run an optimizer step with respect to discriminator trainable variables.
         # Do not forget that we created discriminator_optimizer in the `compile` override.
+        with tf.GradientTape() as dis_tape:
+            discriminated_real = self.discriminator(images, training=True)
+            discriminated_fake = self.discriminator(generated_images, training=True)
+            dis_loss_real = self.compiled_loss(tf.ones([n_samples,]), discriminated_real)
+            dis_loss_fake = self.compiled_loss(tf.zeros([n_samples,]), discriminated_fake)
+            discriminator_loss = dis_loss_real + dis_loss_fake
+            
+        self.discriminator_optimizer.minimize(discriminator_loss, self.discriminator.variables, tape=dis_tape)
 
-        # TODO(gan): Update the discriminator accuracy metric -- call the
+        # Update the discriminator accuracy metric -- call the
         # `self.compiled_metrics.update_state` twice, with the same arguments
         # the `self.compiled_loss` was called during discriminator loss computation.
+        self.compiled_metrics.update_state(tf.ones([n_samples,]), discriminated_real)
+        self.compiled_metrics.update_state(tf.zeros([n_samples,]), discriminated_fake)
 
         return {
             "discriminator_loss": discriminator_loss,

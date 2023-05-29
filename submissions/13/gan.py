@@ -38,20 +38,33 @@ class GAN(tf.keras.Model):
         self._z_dim = args.z_dim
         self._z_prior = tfp.distributions.Normal(tf.zeros(args.z_dim), tf.ones(args.z_dim))
 
-        # TODO: Define `self.generator` as a Model, which
+        # Define `self.generator` as a Model, which
         # - takes vectors of [args.z_dim] shape on input
         # - applies len(args.generator_layers) dense layers with ReLU activation,
         #   i-th layer with args.generator_layers[i] units
         # - applies output dense layer with MNIST.H * MNIST.W * MNIST.C units
         #   and a suitable output activation
         # - reshapes the output (tf.keras.layers.Reshape) to [MNIST.H, MNIST.W, MNIST.C]
+        gen_input =  tf.keras.Input([args.z_dim])
+        gen_x = gen_input
+        for i in range(len(args.generator_layers)):
+            gen_x = tf.keras.layers.Dense(args.generator_layers[i], activation=tf.nn.relu)(gen_x)
+        gen_x = tf.keras.layers.Dense(MNIST.H * MNIST.W * MNIST.C, activation=tf.nn.sigmoid)(gen_x)
+        gen_out = tf.keras.layers.Reshape([MNIST.H, MNIST.W, MNIST.C])(gen_x)
+        self.generator = tf.keras.Model(inputs=gen_input, outputs=gen_out)
 
-        # TODO: Define `self.discriminator` as a Model, which
+        # Define `self.discriminator` as a Model, which
         # - takes input images with shape [MNIST.H, MNIST.W, MNIST.C]
         # - flattens them
         # - applies len(args.discriminator_layers) dense layers with ReLU activation,
         #   i-th layer with args.discriminator_layers[i] units
         # - applies output dense layer with one output and a suitable activation function
+        dis_input = tf.keras.Input([MNIST.H, MNIST.W, MNIST.C])
+        dis_x = tf.keras.layers.Flatten()(dis_input)
+        for i in range(len(args.discriminator_layers)):
+            dis_x = tf.keras.layers.Dense(args.discriminator_layers[i], activation=tf.nn.relu)(dis_x)
+        dis_out = tf.keras.layers.Dense(1, activation=tf.nn.sigmoid)(dis_x)
+        self.discriminator = tf.keras.Model(inputs=dis_input, outputs=dis_out)
 
         self.tb_callback = tf.keras.callbacks.TensorBoard(args.logdir)
 
@@ -68,7 +81,7 @@ class GAN(tf.keras.Model):
         self.generator_optimizer = generator_optimizer
 
     def train_step(self, images: tf.Tensor) -> Dict[str, tf.Tensor]:
-        # TODO: Generator training. With a Gradient tape:
+        # Generator training. With a Gradient tape:
         # - generate as many random latent samples as there are `images`, by a single call
         #   to `self._z_prior.sample`; also pass `seed=self._seed` for replicability;
         # - pass the samples through a generator; do not forget about `training=True`
@@ -78,8 +91,16 @@ class GAN(tf.keras.Model):
         #   (`tf.ones_like` might come handy).
         # Then, run an optimizer step with respect to generator trainable variables.
         # Do not forget that we created generator_optimizer in the `compile` override.
+        with tf.GradientTape() as generator_tape:
+            n_samples = tf.shape(images)[0]
+            latent_samples = self._z_prior.sample([n_samples,],seed=self._seed)
+            generated_images = self.generator(latent_samples, training=True)
+            discriminated_samples = self.discriminator(generated_images, training=True)
+            generator_loss = self.compiled_loss(tf.ones([n_samples,]), discriminated_samples)
+            
+        self.generator_optimizer.minimize(generator_loss, self.generator.variables, tape=generator_tape)
 
-        # TODO: Discriminator training. Using a Gradient tape:
+        # Discriminator training. Using a Gradient tape:
         # - discriminate `images` with `training=True`, storing
         #   results in `discriminated_real`
         # - discriminate images generated in generator training with `training=True`,
@@ -89,10 +110,20 @@ class GAN(tf.keras.Model):
         #   - `self.compiled_loss` on `discriminated_fake` with suitable targets.
         # Then, run an optimizer step with respect to discriminator trainable variables.
         # Do not forget that we created discriminator_optimizer in the `compile` override.
+        with tf.GradientTape() as dis_tape:
+            discriminated_real = self.discriminator(images, training=True)
+            discriminated_fake = self.discriminator(generated_images, training=True)
+            dis_loss_real = self.compiled_loss(tf.ones([n_samples,]), discriminated_real)
+            dis_loss_fake = self.compiled_loss(tf.zeros([n_samples,]), discriminated_fake)
+            discriminator_loss = dis_loss_real + dis_loss_fake
+            
+        self.discriminator_optimizer.minimize(discriminator_loss, self.discriminator.variables, tape=dis_tape)
 
-        # TODO: Update the discriminator accuracy metric -- call the
+        # Update the discriminator accuracy metric -- call the
         # `self.compiled_metrics.update_state` twice, with the same arguments
         # the `self.compiled_loss` was called during discriminator loss computation.
+        self.compiled_metrics.update_state(tf.ones([n_samples,]), discriminated_real)
+        self.compiled_metrics.update_state(tf.zeros([n_samples,]), discriminated_fake)
 
         return {
             "discriminator_loss": discriminator_loss,
